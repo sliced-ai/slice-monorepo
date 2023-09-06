@@ -1,0 +1,9 @@
+aws s3 mb s3://sliced-ai.com
+
+aws s3 website s3://sliced-ai.com/ --index-document index.html
+
+aws s3api put-bucket-policy --bucket sliced-ai.com --policy file://bucket-policy.json
+
+aws s3 cp index.html s3://sliced-ai.com/
+
+http://sliced-ai.com.s3-website-us-west-2.amazonaws.com/

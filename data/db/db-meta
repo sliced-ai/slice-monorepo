@@ -1,0 +1,5 @@
+admin: KVTGNj6mhktYlhL4yn5J
+
+
+Ping
+mysqladmin -h slice-test-db-instance-1.cdlrwo3rdhzj.us-west-2.rds.amazonaws.com -P 3306 -u admin -p ping

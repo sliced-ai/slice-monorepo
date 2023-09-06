@@ -1,0 +1,4 @@
+
+data/db/connection-creds.txt
+*.json
+*.jsonl

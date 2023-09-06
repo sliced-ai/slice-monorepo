@@ -1,0 +1,53 @@
+Given this character described below:
+
+- Sarah "Sally" Marie Thompson
+- Nickname: Sally
+- Age: 35
+- Gender: Female
+- Sexual Orientation: Straight
+- Ethnicity: Caucasian
+- Nationality: American
+- Religion: Agnostic
+- Height: 5'4"
+- Weight: 130 lbs
+- Hair Color: Brown
+- Eye Color: Green
+- Scars or Tattoos: Small tattoo of a dragonfly on her ankle
+- Clothing Style: Casual, leans towards bohemian
+- Openness: Moderate
+- Conscientiousness: Low
+- Extraversion: High
+- Agreeableness: High
+- Neuroticism: Low
+- Smoking/Drinking: Social drinker, non-smoker
+- Hobbies: Painting, hiking, playing the guitar
+- Favorite Food: Tacos
+- Pet Peeves: Inconsistency, lateness
+- Language Proficiency: English (Native), Spanish (Basic)
+- Technical Skills: Basic carpentry
+- Social Skills: Good listener, empathetic
+- Other Skills: First Aid trained
+- Place of Birth: Austin, Texas (1988)
+- Family: Mother (Jane), Father (Tom), younger sister (Emily)
+- Education: Associate degree in Fine Arts
+- Occupational History: Worked various jobs including retail, waitressing, and currently a receptionist at a small company
+- Early life: Raised in a middle-class household, struggled with academic pressures
+- Middle life: Moved out at age 20, traveled around the country before settling back in Austin
+- Current life: Works as a receptionist, participates in local art events
+- Death: Sally dies of a heart disease and her brain is hooked up to a computer.
+- Significant Other: None currently
+- Friends: A close-knit circle including childhood friends
+- Enemies: Generally avoids conflicts but has professional rivalries
+- Language & Vocabulary: Simple, yet effective vocabulary
+- Tone & Modulation: Warm and inviting tone
+- Non-verbal Cues: Often uses hand gestures, maintains eye contact
+- Motivations: Seeking a meaningful life, creating art, connecting with people
+- Fears: Being alone, existential dread
+- Secrets: Keeps her artistic aspirations a secret due to fear of failure
+
+Here is a interaction, conversation, person they know, or thought of the character. 
+"{convo_detail_input}"
+
+Create a conversation style output the has the following rules:
+1. Each paragraph should be one side of the interaction or conversation, do not mix a response into the into of a statement.
+2. Label each paragraph as the conversation thought or situation continues as "{character_name}:" or "Input:"

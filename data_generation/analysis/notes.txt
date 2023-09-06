@@ -1,0 +1,17 @@
+Text comparisons:
+
+temperature: 0.6
+top_p: 0.9
+- running twice results in identical outputs
+- almost perfectly the same
+
+temperature: 0.8
+top_p: 0.9
+- compared with 0.6t and it is similar but not identical
+- getting better
+
+temperature: 0.85
+top_p: 0.7
+
+temperature:
+top_p:

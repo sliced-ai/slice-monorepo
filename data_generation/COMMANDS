@@ -1,0 +1,31 @@
+source ~/.bashrc
+conda create --name llama_env python=3.8
+conda activate llama_env
+pip install -r requirements.txt
+
+torchrun --nproc_per_node 8 chat_completion.py \
+    --ckpt_dir llama-2-70b-chat/ \
+    --tokenizer_path tokenizer.model \
+    --max_seq_len 512 --max_batch_size 6 \
+    --dialog_files=./chatdata/*.json
+    
+    
+TESTING:
+torchrun --nproc_per_node 1 example_chat_completion.py \
+    --ckpt_dir llama-2-7b-chat/ \
+    --tokenizer_path tokenizer.model \
+    --max_seq_len 512 --max_batch_size 6
+    
+torchrun --nproc_per_node 1 convo_data_creation.py \
+    --ckpt_dir /home/ubuntu/llama/llama-2-7b-chat/ \
+    --tokenizer_path tokenizer.model \
+    --max_seq_len 2048 --max_batch_size 1 \
+    --convo_template_file /home/ubuntu/convos/convos/convo_template.txt \
+    --saved_details_file /home/ubuntu/convos/convos/detail_inputs.json
+
+
+FOLDER COPY:
+scp -i "gputesting.pem" -r /home/ec2-user/environment/data_generation/convo_generation ubuntu@ec2-54-244-61-224.us-west-2.compute.amazonaws.com:/home/ubuntu/convos
+
+scp -i "gputesting.pem" -r ubuntu@ec2-54-244-61-224.us-west-2.compute.amazonaws.com:/home/ubuntu/convos /home/ec2-user/environment/convos
+
