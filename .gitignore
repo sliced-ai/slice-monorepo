@@ -2,3 +2,7 @@
 data/db/connection-creds.txt
 *.json
 *.jsonl
+*.pyc
+data_generation/character-create/expansion_data.txt
+data_generation/character-create/generated_texts.txt
+data_generation/.DS_Store

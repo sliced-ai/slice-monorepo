@@ -3,6 +3,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from scipy.spatial import distance
 import json
 
+
 def jaccard_similarity(str1, str2):
     set1 = set(str1.split())
     set2 = set(str2.split())
@@ -20,8 +21,8 @@ def calculate_cosine_similarity(tfidf_vectorizer, str1, str2):
     return cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
 
 if __name__ == "__main__":
-    file1 = '/home/ec2-user/environment/data_generation/analysis/llm_training_data_1.jsonl'
-    file2 = '/home/ec2-user/environment/data_generation/analysis/llm_training_data_2.jsonl'
+    file1 = '/home/ec2-user/environment/data_generation/analysis/llm_training_data_0.jsonl'
+    file2 = '/home/ec2-user/environment/data_generation/analysis/llm_training_data_n.jsonl'
 
     data1 = load_jsonl(file1)
     data2 = load_jsonl(file2)

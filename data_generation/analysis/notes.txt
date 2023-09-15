@@ -1,4 +1,4 @@
-Text comparisons:
+Text comparisons inferencing on LLAMA2 7B chat 9.6.23
 
 temperature: 0.6
 top_p: 0.9
@@ -12,6 +12,10 @@ top_p: 0.9
 
 temperature: 0.85
 top_p: 0.7
+- very different from original
+- Nearly the same as the other done at same time
+- Output Starting to degrade
 
-temperature:
-top_p:
+Solution:
+- generate datasets from different temperature and top_p values
+- to generate more I will need to modify the input ("rewrite this bullet point")
