@@ -142,6 +142,11 @@ class DataProcessingPipeline:
         pipe = pipeline(task="text-generation", model=model, tokenizer=tokenizer, max_length=200)
         result = pipe(f"<s>[INST] {prompt} [/INST]")
         print(result[0]['generated_text'])
+        
+        prompt = "What's your favorite hobbies?"
+        pipe = pipeline(task="text-generation", model=model, tokenizer=tokenizer, max_length=200)
+        result = pipe(f"<s>[INST] {prompt} [/INST]")
+        print(result[0]['generated_text'])
 
 if __name__ == '__main__':
     pipeline_obj = DataProcessingPipeline(model_name="NousResearch/Llama-2-7b-chat-hf", 
