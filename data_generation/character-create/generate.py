@@ -8,6 +8,7 @@ import uuid
 import re
 import time
 import os
+import torch
 import json
 from datetime import datetime
 logging.basicConfig(level=logging.INFO)
@@ -16,6 +17,8 @@ logging.basicConfig(level=logging.INFO)
 from quality_selector import analyze_and_select_best_text
 from llama import Llama, Dialog 
 from random_words import get_random_words
+from fine_tuner import FineTuner
+from extract_convo import ConversationProcessor
 
 ################################
 class DataMover:
@@ -68,7 +71,6 @@ class DataMover:
                     print(f'Successfully moved {local_file_path} to {bucket_name}/{s3_path}')
                     
                     # Optionally, delete the local file after upload
-                    os.remove(local_file_path)
                 except Exception as e:
                     print(f'An error occurred: {e}')
 
@@ -107,6 +109,22 @@ class DataProcessor:
                 filtered_info += f"{point}: {match.group(1)}\n"
         
         return filtered_info
+
+    ################################
+    def extract_bullet_points(self, text):
+        # Regex patterns for bullet points
+        patterns = [
+            r'^\d+\.\s+(.*)',      # Pattern 1
+            r'^\*\s+(.*)',         # Pattern 2
+            r'^•\s+(.*)',          # Pattern 3
+        ]
+    
+        # Check if any of the patterns match in the text
+        for pattern in patterns:
+            if re.search(pattern, text, re.MULTILINE):
+                return True
+    
+        return False  # None of the patterns matched
         
 ################################
 class TextGenerator:
@@ -154,7 +172,13 @@ class TextGenerator:
             )
             full_response = raw_response['choices'][0]['message']['content'].strip()
         return full_response
-        
+    ################################
+    def clear_gpu_memory(self):
+        del self.generator
+        self.generator = None
+        torch.cuda.empty_cache()
+
+    
 ################################
 class FileManager:
     
@@ -167,7 +191,8 @@ class FileManager:
 class MainController:
     
     ################################
-    def __init__(self, downloader, processor, text_generator, file_manager):
+    def __init__(self, downloader, processor, text_generator, file_manager,fast_run):
+        self.fast_run = fast_run
         self.downloader = downloader
         self.processor = processor
         self.text_generator = text_generator
@@ -179,77 +204,165 @@ class MainController:
     
     ################################
     def generate_and_analyze_texts(self, args):
-        with open("./data/seed_generation.txt", "a") as f:
-            sets = 10
-            for i in range(sets):
+        if self.fast_run: 
+            with open("./data/seed_generation.txt", "a") as f:
                 seed_prompt = self.json_data['Seed-Prompt']['text'].format(random_seed=get_random_words(3))
                 self.core_character = self.text_generator.generate_text(seed_prompt, args.temperature, args.max_tokens)
                 f.write(self.processor.filter_character_info(self.core_character))
-                if i < sets-1:
-                    f.write("\n-----\n")
-        best_text = analyze_and_select_best_text("data/generated_texts.txt", "data/analysis_result.json", "data/analysis_chart.png")
-        self.core_character = self.processor.filter_character_info(best_text)
-        self.full_name = re.search(r'Full Name:\s+(.*?)\n', self.core_character).group(1)
+            self.core_character = self.processor.filter_character_info(self.core_character)
+            self.full_name = re.search(r'Full Name:\s+(.*?)\n', self.core_character).group(1)
+        else:
+            with open("./data/seed_generation.txt", "a") as f:
+                sets = 10
+                for i in range(sets):
+                    seed_prompt = self.json_data['Seed-Prompt']['text'].format(random_seed=get_random_words(3))
+                    self.core_character = self.text_generator.generate_text(seed_prompt, args.temperature, args.max_tokens)
+                    f.write(self.processor.filter_character_info(self.core_character))
+                    if i < sets-1:
+                        f.write("\n-----\n")
+            best_text = analyze_and_select_best_text("data/generated_texts.txt", "data/analysis_result.json", "data/analysis_chart.png")
+            self.core_character = self.processor.filter_character_info(best_text)
+            self.full_name = re.search(r'Full Name:\s+(.*?)\n', self.core_character).group(1)
     
     ################################
     def generate_convo_details(self, args):
-        self.convo_details = []
-        with open("./data/expansion_generation.txt", "a") as f:
-            for prompt_key, prompt_text in self.json_data['Expansion-Prompts'].items():
-                formatted_prompt = prompt_text.format(random_seed=get_random_words(4), core_character=self.core_character)
-                bullet_points = self.text_generator.generate_text(formatted_prompt, args.temperature, args.max_tokens)
-                clean_output = "Check to make sure the below is in bullet format and if not then format it.: \n"
-                extracted_items = self.text_generator.generate_text(clean_output + bullet_points, args.temperature, args.max_tokens)
-                self.convo_details += extracted_items
-                f.write(str(extracted_items))
-                f.write("\n-----\n")
+        if self.fast_run: 
+            self.convo_details = []
+            max_retries = 3  # You can adjust this based on your requirements
+            
+            with open("./data/expansion_generation.txt", "a") as f:
+                for prompt_key, prompt_text in self.json_data['Expansion-Prompts'].items():
+                    retries = 0
+                    
+                    while retries < max_retries:
+                        rejected = 0
+                        formatted_prompt = prompt_text.format(random_seed=get_random_words(4), core_character=self.core_character)
+                        bullet_points = self.text_generator.generate_text(formatted_prompt, args.temperature, args.max_tokens)
+                        clean_output = "Check to make sure the below is in bullet format and if not then format it.: \n"
+                        extracted_items = self.text_generator.generate_text(clean_output + bullet_points, args.temperature, args.max_tokens)
+                        extracted_list = extracted_items.splitlines()
+                        
+                        for bullet_point in extracted_list:
+                            if self.processor.extract_bullet_points(bullet_point):
+                                if len(bullet_point) > 15:
+                                    self.convo_details.append(bullet_point)
+                            else:
+                                rejected += 1
+                        
+                        if rejected <= 2:
+                            break  # Successful generation, so break out of the retry loop
+                        
+                        retries += 1  # Increment retry counter
+                    
+                    # If reached max_retries, you might want to handle it, e.g., logging that it exceeded max retries for this prompt
+                    
+                    f.write(str(self.convo_details))
+                    f.write("\n-----\n")
+                    break
+        else:
+            self.convo_details = []
+            with open("./data/expansion_generation.txt", "a") as f:
+                for prompt_key, prompt_text in self.json_data['Expansion-Prompts'].items():
+                    formatted_prompt = prompt_text.format(random_seed=get_random_words(4), core_character=self.core_character)
+                    bullet_points = self.text_generator.generate_text(formatted_prompt, args.temperature, args.max_tokens)
+                    clean_output = "Check to make sure the below is in bullet format and if not then format it.: \n"
+                    extracted_items = self.text_generator.generate_text(clean_output + bullet_points, args.temperature, args.max_tokens)
+                    self.convo_details += extracted_items
+                    f.write(str(extracted_items))
+                    f.write("\n-----\n")
 
     ################################
     def generate_convo_data(self, args):
-        with open(f"./data/{self.full_name}_convo_data.txt", "a") as f:
-            for convo_detail_input in self.convo_details:
-                convo_prompt = self.json_data['Conversation-Prompt']['text'].format(convo_detail_input=convo_detail_input, character_name=self.full_name, random_seed=get_random_words(4), core_character=self.core_character)
-                convo = self.text_generator.generate_text(convo_prompt, args.temperature, args.max_tokens)
-                clean_output = "Ideal Format:\nJSONL (JSON Lines format) where each line is a valid JSON object representing a single conversation. Each object should have at least these fields:\n\nrole: The name of the character speaking\ncontent: The text of what the character said\nExample:\njsonl\nCopy code\n{\"role\": \"Alice\", \"content\": \"Hello, how are you?\"}\n{\"role\": \"Bob\", \"content\": \"I'm good, thanks.\"}\n\nread this conversation below and format it correctly. Ignore everything except the conversation."
-                extracted_items = self.text_generator.generate_text(clean_output + convo, args.temperature, args.max_tokens)
-                convo_json = {
-                    "content": extracted_items.strip(),
-                    "details": {
-                        "convo_prompt": convo_detail_input,
-                        "model" : "LLAMA7B-Chat",
-                        "date" : datetime.now(),
-                        "temperature": args.temperature,
-                        "max_tokens": args.max_tokens
+        if self.fast_run: 
+            with open(f"./data/convo_data.jsonl", "a") as f:
+                for convo_detail_input in self.convo_details:
+                    convo_prompt = self.json_data['Conversation-Prompt']['text'].format(convo_detail_input=convo_detail_input, character_name=self.full_name, random_seed=get_random_words(4), core_character=self.core_character)
+                    convo = self.text_generator.generate_text(convo_prompt, args.temperature, args.max_tokens)
+                    clean_output = "Ideal Format:\nJSONL (JSON Lines format) where each line is a valid JSON object representing a single conversation. Each object should have at least these fields:\n\nrole: The name of the character speaking\ncontent: The text of what the character said\nExample:\njsonl\nCopy code\n{\"role\": \"Alice\", \"content\": \"Hello, how are you?\"}\n{\"role\": \"Bob\", \"content\": \"I'm good, thanks.\"}\n\nread this conversation below and format it correctly. Only include the conversation."
+                    extracted_items = self.text_generator.generate_text(clean_output + convo, args.temperature, args.max_tokens)
+                    
+                    convo_json = {
+                        "content": extracted_items.strip(),
+                        "details": {
+                            "convo_prompt": convo_detail_input,
+                            "model" : "LLAMA7B-Chat",
+                            "date" : str(datetime.now()),
+                            "temperature": args.temperature,
+                            "max_tokens": args.max_tokens
+                        }
                     }
-                }
-                f.write(json.dumps(convo_json))
-                f.write("\n-----\n")
+                    f.write(json.dumps(convo_json))
+                    break
+        else:  
+            with open(f"./data/convo_data.txt", "a") as f:
+                for convo_detail_input in self.convo_details:
+                    convo_prompt = self.json_data['Conversation-Prompt']['text'].format(convo_detail_input=convo_detail_input, character_name=self.full_name, random_seed=get_random_words(4), core_character=self.core_character)
+                    convo = self.text_generator.generate_text(convo_prompt, args.temperature, args.max_tokens)
+                    clean_output = "Ideal Format:\nJSONL (JSON Lines format) where each line is a valid JSON object representing a single conversation. Each object should have at least these fields:\n\nrole: The name of the character speaking\ncontent: The text of what the character said\nExample:\njsonl\nCopy code\n{\"role\": \"Alice\", \"content\": \"Hello, how are you?\"}\n{\"role\": \"Bob\", \"content\": \"I'm good, thanks.\"}\n\nread this conversation below and format it correctly. Ignore everything except the conversation."
+                    extracted_items = self.text_generator.generate_text(clean_output + convo, args.temperature, args.max_tokens)
+                    convo_json = {
+                        "content": extracted_items.strip(),
+                        "details": {
+                            "convo_prompt": convo_detail_input,
+                            "model" : "LLAMA7B-Chat",
+                            "date" : datetime.now(),
+                            "temperature": args.temperature,
+                            "max_tokens": args.max_tokens
+                        }
+                    }
+                    f.write(json.dumps(convo_json))
+                    f.write("\n-----\n")
 
     ################################
     def run(self, args):
+        
+        start_time = time.time()
         s3_client = boto3.client('s3')
         self.downloader.download_json_from_s3(s3_client, args.bucket, args.key, args.download_path)
         self.json_data = self.processor.load_json(args.download_path)
-        start_time = time.time()
 
         logging.info("\n\n########   SEED GENERATION\n\n")
         self.generate_and_analyze_texts(args)
-        logging.info(f"\n\n########   BEST SEED: \n{self.core_character}\n\n\n")
+        #logging.info(f"\n\n########   BEST SEED: \n{self.core_character}\n\n\n")
 
         logging.info("\n\n########   EXPANSION GENERATION\n\n")
         self.generate_convo_details(args)
-        self.downloader.move_folder_to_s3(f"./data/", "slice-system-logs", "data_generation")
+        #self.downloader.move_folder_to_s3(f"./data/", "slice-system-logs", "data_generation")
         
         logging.info("\n\n######## CONVO DATA GENERATION\n\n")
         self.generate_convo_data(args)
+        
+        # File paths for input and output files
+        input_file = './data/convo_data.jsonl'
+        #output_file = '/home/ec2-user/environment/data_generation/character-create/data/cleaned_conversations.jsonl'
+        output_file = './data/cleaned_conversations.jsonl'
+        # Create an instance of the class and run the methods
+        processor = ConversationProcessor(input_file)
+        processor.load_conversations()
+        processor.clean_conversations()
+        processor.save_to_jsonl(output_file)
 
-        self.downloader.move_folder_to_s3(f"./data/", "slice-system-logs", "data_generation")
+        #self.downloader.move_folder_to_s3(f"./data/", "slice-system-logs", "data_generation")
         end_time = time.time()
         elapsed_time = end_time - start_time
-        logging.info(f"Total time: {elapsed_time:.4f} seconds")
+        logging.info(f"GENERATION TIME: {elapsed_time:.4f} seconds")
+        
+        start_time = time.time()
+        logging.info("\n\n######## FINE TUNING\n\n")
+        
+        self.text_generator.clear_gpu_memory()
+        tuner = FineTuner(
+        model_name="NousResearch/Llama-2-7b-chat-hf",
+        dataset_name="mlabonne/guanaco-llama2-1k",
+        new_model="llama-2-7b-miniguanaco"
+        )
+        tuner.fine_tune(output_file)
+        elapsed_time = end_time - start_time
+        logging.info(f"FINE TUNING TIME: {elapsed_time:.4f} seconds")
         
 ################################
 if __name__ == "__main__":
+    
     parser = argparse.ArgumentParser(description="Download a JSON file from S3 and generate text.")
     parser.add_argument('--bucket', required=True, help='Name of the S3 bucket')
     parser.add_argument('--key', required=True, help='Key of the file in the S3 bucket')
@@ -261,14 +374,20 @@ if __name__ == "__main__":
     parser.add_argument('--use_llama', action='store_true', help='Use Llama model')
     parser.add_argument('--ckpt_dir', default='', help='Checkpoint directory for Llama model')
     parser.add_argument('--tokenizer_path', default='', help='Tokenizer path for Llama model')
+    parser.add_argument('--fast_run', default=False)
 
     args = parser.parse_args()
+    fast_run = args.fast_run
+    fast_run = True
+    if fast_run: 
+        logging.info("\n####\n\n#### FAST RUN IS ENABLED ####\n\n####\n")
+
 
     downloader = DataMover()
     processor = DataProcessor()
     text_generator = TextGenerator(args.model_engine, args.api_key, args.use_llama, args.ckpt_dir, args.tokenizer_path)
     file_manager = FileManager()
-    main_controller = MainController(downloader, processor, text_generator, file_manager)
+    main_controller = MainController(downloader, processor, text_generator, file_manager,fast_run)
 
     main_controller.run(args)
     
