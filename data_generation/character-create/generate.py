@@ -231,6 +231,7 @@ class MainController:
                     
                     f.write(str(self.convo_details))
                     f.write("\n-----\n")
+                    self.convo_details = []
 
     ################################
     def generate_convo_data(self, args):
