@@ -27,18 +27,19 @@ class DataProcessor:
     def filter_character_info(self, text: str) -> str:
         # Define the list of bullet points you want to keep
         bullet_points = [
-            "Full Name", "Nickname", "Age", "Gender", "Sexual Orientation",
-            "Ethnicity", "Nationality", "Religion", "Height", "Weight",
-            "Hair Color", "Eye Color", "Scars or Tattoos", "Clothing Style",
-            "Openness", "Conscientiousness", "Extraversion", "Agreeableness",
-            "Neuroticism", "Smoking/Drinking", "Hobbies", "Favorite Food",
-            "Pet Peeves", "Language Proficiency", "Technical Skills",
-            "Social Skills", "Other Skills", "Place of Birth", "Family",
-            "Education", "Occupational History", "Early Life", "Middle Life",
-            "Current Life", "Significant Other", "Friends", "Enemies",
-            "Language & Vocabulary", "Tone & Modulation", "Non-verbal Cues",
-            "Motivations", "Fears", "Secrets"
+            "Full Name", "Nickname", "Age", "Gender", "Ethnicity", "Nationality",
+            "Height", "Weight", "Hair Color", "Eye Color", "Scars or Tattoos",
+            "Clothing Style", "Hobbies", "Favorite Food", "Language Proficiency",
+            "Family", "Friends", "Education", "Occupational History", "Current Feelings and State",
+            "Motivations", "Fears", "Secrets", "Past Year Overview", 
+            "Early life experiences", "Basic education", "Playmates", "Simple hobbies",
+            "Educational aspirations", "Developing social skills", "Complex emotional states",
+            "Higher education", "Early career experiences", "Romantic relationships", 
+            "Evolving personal beliefs", "Career progression", "Family dynamics", 
+            "Maturing worldviews", "Life achievements", "Major life changes", 
+            "Retirement or legacy thoughts"
         ]
+
         
         filtered_info = ""
         
@@ -165,7 +166,7 @@ class MainController:
             self.full_name = re.search(r'Full Name:\s+(.*?)\n', self.core_character).group(1)
     
     ################################
-    def generate_convo_details(self, args):
+    def generate_convo_details(self, args,current_age):
         if self.fast_run == True: 
             self.convo_details = []
             max_retries = 3  # You can adjust this based on your requirements
@@ -176,7 +177,7 @@ class MainController:
                     
                     while retries < max_retries:
                         rejected = 0
-                        formatted_prompt = prompt_text.format(random_seed=get_random_words(4), core_character=self.core_character)
+                        formatted_prompt = prompt_text.format(random_seed=get_random_words(4), core_character=self.core_character, age_range=current_age)
                         bullet_points = self.text_generator.generate_text(formatted_prompt, args.temperature, args.max_tokens)
                         clean_output = "Check to make sure the below is in bullet format and if not then format it.: \n"
                         extracted_items = self.text_generator.generate_text(clean_output + bullet_points, args.temperature, args.max_tokens)
@@ -209,7 +210,7 @@ class MainController:
                     
                     while retries < max_retries:
                         rejected = 0
-                        formatted_prompt = prompt_text.format(random_seed=get_random_words(4), core_character=self.core_character)
+                        formatted_prompt = prompt_text.format(random_seed=get_random_words(4), core_character=self.core_character, age_range=current_age)
                         bullet_points = self.text_generator.generate_text(formatted_prompt, args.temperature, args.max_tokens)
                         clean_output = "Check to make sure the below is in bullet format and if not then format it.: \n"
                         extracted_items = self.text_generator.generate_text(clean_output + bullet_points, args.temperature, args.max_tokens)
@@ -231,7 +232,6 @@ class MainController:
                     
                     f.write(str(self.convo_details))
                     f.write("\n-----\n")
-                    self.convo_details = []
 
     ################################
     def generate_convo_data(self, args):
@@ -283,6 +283,21 @@ class MainController:
         processor.load_conversations()
         processor.clean_conversations()
         processor.save_to_jsonl(output_file)
+
+    ################################
+    def year_summary_update(self,args,current_age):
+        with open("./data/seed_generation.txt", "a") as f:
+            summary_prompt = self.json_data['Year-Summary-Prompt']['text'].format(age_range = current_age,core_character = self.core_character)
+            year_summary = self.text_generator.generate_text(summary_prompt, args.temperature, args.max_tokens)
+            
+            datamover.logger.info(f'Summary: \n\n{year_summary}')
+            
+            update_prompt = self.json_data['Seed-Update-Prompt']['text'].format(year_summary = year_summary, age_range = current_age,core_character = self.core_character)
+            raw_core_character = self.text_generator.generate_text(update_prompt, args.temperature, args.max_tokens)
+            
+            self.core_character = self.processor.filter_character_info(raw_core_character)
+            f.write(self.core_character)
+        self.full_name = re.search(r'Full Name:\s+(.*?)\n', self.core_character).group(1)
         
     ################################
     def run(self, args):
@@ -295,11 +310,26 @@ class MainController:
         self.generate_and_analyze_texts(args)
         #datamover.logger.info(f"\n\n########   BEST SEED: \n{self.core_character}\n\n\n")
 
-        datamover.logger.info("\n\n########   EXPANSION GENERATION\n\n")
-        self.generate_convo_details(args)
-        
-        datamover.logger.info("\n\n######## CONVO DATA GENERATION\n\n")
-        self.generate_convo_data(args)
+        max_age = 30
+        for age in range(6,max_age+1):
+            try:
+                datamover.logger.info("\n\n########   AGE: "+str(age)+"\n\n")  
+                datamover.logger.info("\n\n######## Year Update Summary\n\n")
+                self.year_summary_update(args,age)
+                datamover.logger.info("\n\n########   EXPANSION GENERATION\n\n")  
+                self.generate_convo_details(args,age)
+                datamover.logger.info("\n\n######## CONVO DATA GENERATION\n\n")
+                self.generate_convo_data(args)
+                
+            except: #TODO MAKE THIS LESS DUMB
+                datamover.logger.info("\n\n########   AGE: "+str(age)+"\n\n")  
+                datamover.logger.info("\n\n######## Year Update Summary\n\n")
+                self.year_summary_update(args,age)
+                datamover.logger.info("\n\n########   EXPANSION GENERATION\n\n")  
+                self.generate_convo_details(args,age)
+                datamover.logger.info("\n\n######## CONVO DATA GENERATION\n\n")
+                self.generate_convo_data(args)
+
         
         # Save some meta info to pass about easier
         filename = "./data/meta.txt"
