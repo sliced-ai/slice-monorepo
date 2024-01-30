@@ -283,6 +283,7 @@ class MainController:
         processor.load_conversations()
         processor.clean_conversations()
         processor.save_to_jsonl(output_file)
+        self.convo_details = [] # double check to ensure no repeated saving
 
     ################################
     def year_summary_update(self,args,current_age):

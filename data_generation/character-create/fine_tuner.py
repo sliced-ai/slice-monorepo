@@ -188,9 +188,9 @@ class FineTuner:
         transformed_dataset = dataset.map(self._transform_conversation)
         print(f"\nlen dataset: {dataset}")
         print(f"len transformed_dataset: {transformed_dataset}\n")
-    
+
         model, tokenizer = self._initialize_model()
-    
+
         trainer = SFTTrainer(
             model=model,
             train_dataset=transformed_dataset,

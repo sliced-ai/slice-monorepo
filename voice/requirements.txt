@@ -1,4 +1,0 @@
-scipy>=1.7.0  # or whichever the latest version is at the time of your setup
-transformers==4.19.0
-torchaudio
-IPython

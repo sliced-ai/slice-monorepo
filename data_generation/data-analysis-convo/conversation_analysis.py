@@ -78,25 +78,77 @@ def save_histogram(similarity_scores, file_name):
     plt.savefig(file_name)
     plt.close()
 
-def analyze_roles(file_path):
+
+def standardize_role(role, character_names):
+    if role in character_names:
+        return character_names[0]  # Replace with the first character name
+    elif role != "Input":
+        return "Input"  # Standardize non-character roles to "Input"
+    return role
+
+def filter_single_exchange_conversations(conversations):
+    """
+    Filters out conversations that have only a single exchange.
+
+    :param conversations: List of conversations, where each conversation is a list of exchanges.
+    :return: List of conversations with more than one exchange.
+    """
+    filtered_conversations = [conv for conv in conversations if len(conv) > 1]
+    return filtered_conversations
+
+
+def analyze_roles(file_path, character_names):
     role_mentions = {}
     role_words = {}
+    cleaned_conversations = []
+    invalid_conversations = []
 
     with open(file_path, 'r', encoding='utf-8') as file:
         for line in file:
             conversation = json.loads(line.strip())
+            valid_conversation = True
+            last_speaker_was_character = None
+
             for exchange in conversation:
                 role = exchange['role']
                 content = exchange['content']
                 words = content.split()
                 word_count = len(words)
 
-                if role not in role_mentions:
-                    role_mentions[role] = 0
-                    role_words[role] = []
+                # Standardize roles
+                standardized_role = standardize_role(role, character_names)
+                exchange['role'] = standardized_role
 
-                role_mentions[role] += 1
-                role_words[role].append(word_count)
+                # Update statistics
+                if standardized_role not in role_mentions:
+                    role_mentions[standardized_role] = 0
+                    role_words[standardized_role] = []
+                role_mentions[standardized_role] += 1
+                role_words[standardized_role].append(word_count)
+
+                # Check conversation format
+                current_speaker_is_character = standardized_role == character_names[0]
+                if last_speaker_was_character is not None:
+                    if current_speaker_is_character == last_speaker_was_character:
+                        valid_conversation = False
+                        break
+                last_speaker_was_character = current_speaker_is_character
+
+            if valid_conversation:
+                cleaned_conversations.append(conversation)
+            else:
+                invalid_conversations.append(conversation)
+
+    # Save cleaned conversations
+    filtered_conversations = filter_single_exchange_conversations(cleaned_conversations)
+    with open('roles_fixed.jsonl', 'w', encoding='utf-8') as file:
+        for conversation in filtered_conversations:
+            file.write(json.dumps(conversation) + '\n')
+
+    # Save invalid conversations
+    with open('invalid_conversations.jsonl', 'w', encoding='utf-8') as file:
+        for conversation in invalid_conversations:
+            file.write(json.dumps(conversation) + '\n')
 
     # Calculate statistics and create a DataFrame
     role_stats = []
@@ -120,7 +172,6 @@ def analyze_roles(file_path):
     print(df_sorted)
 
     return df_sorted
-
 
 def save_similarity_to_csv(similarity_scores, num_conversations, filename):
     """
