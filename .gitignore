@@ -6,3 +6,9 @@ data/db/connection-creds.txt
 data_generation/character-create/expansion_data.txt
 data_generation/character-create/generated_texts.txt
 data_generation/.DS_Store
+loosefiles/openai
+model_training/Fine_Tune/data/.DS_Store
+model_training/Fine_Tune/.DS_Store
+*.png
+*.tsv
+infastructure/.DS_Store
