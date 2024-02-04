@@ -1,0 +1,23 @@
+This is a rewrite and update to the entire generation and training system into one coherent pipeline. 
+
+Core use of this project is to build a system capable of the following:
+- Generate large amounts of targeted sythetic data.
+- Train a customized model with that sythetic data.
+- Enable a RTC with users with their customized data
+
+Core components:
+0: All steps & setup run once in support of the pipeline
+1. Initial input and generation of core details
+2. Generation of raw sythetic data
+3. Data analysis and cleaning
+4. Preprocessing of data for model
+5. Bulk model training / RTC
+6. Bulk model eval / feedback for RTC
+
+Data & Experiment Tracking:
+- All runs have a UUID
+- S3 holds UUID and data in same format as the folder is setup per run
+
+terms:
+RTC: real time conversations (fine tuning loop on conversations)
+Core Details: data generated for generation of raw sythetic data
