@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Product Demo</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/charts.css">
+</head>
+<body>
+  <header>
+    <img src="assets/images/logo.png" alt="Logo" id="logo">
+    <h1>AI Product Demo</h1>
+  </header>
+  
+  <main>
+    <section id="data-generation">
+      <h2>Data Generation</h2>
+      <textarea id="user-input" placeholder="Enter a paragraph of information"></textarea>
+      <button id="submit-input-btn" title="Submit your input for data generation">Submit</button>
+    </section>
+    
+    <section id="generated-data" class="hidden">
+      <h2>Generated Data</h2>
+      <div id="loading-indicator">
+        <p>Generating additional information...</p>
+        <progress id="generation-progress" max="100"></progress>
+      </div>
+      <div id="edit-area">
+        <!-- Editable generated data will be displayed here -->
+      </div>
+      <button id="submit-edit-btn">Submit Edited Data</button>
+    </section>
+    
+    <section id="training" class="hidden">
+      <h2>Model Training</h2>
+      <div id="training-progress">
+        <p>Training the model...</p>
+        <progress id="training-progress-bar" max="100"></progress>
+        <p id="training-message"></p>
+      </div>
+    </section>
+    
+    <section id="performance" class="hidden">
+      <h2>Model Performance</h2>
+      <div id="performance-charts">
+        <!-- Interactive charts and graphs will be displayed here -->
+      </div>
+      <button id="start-chat-btn" class="highlight-btn">Start Chatting</button>
+    </section>
+    
+    <section id="chat" class="hidden">
+      <h2>Chat with the Model</h2>
+      <div id="chat-window">
+        <!-- Chat messages will be displayed here -->
+      </div>
+      <input type="text" id="chat-input" placeholder="Type your message...">
+      <button id="send-chat-btn">Send</button>
+      
+      <div id="metrics-sidebar">
+        <h3>Model Metrics</h3>
+        <!-- Running metrics will be displayed here -->
+      </div>
+    </section>
+  </main>
+  
+  <footer>
+    <!-- Footer content -->
+  </footer>
+  
+  <script src="js/main.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/chat.js"></script>
+</body>
+</html>

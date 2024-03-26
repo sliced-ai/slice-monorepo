@@ -1,0 +1,5 @@
+This is a quick test of the memory mechanisms I want in my final model.
+
+I want to create a dataset with time and previous conversation in it and train until it works.
+
+I then want to train a second model set that takes all the data and puts it in forever assending order by days and see if it can remember conversations from some time ago.
