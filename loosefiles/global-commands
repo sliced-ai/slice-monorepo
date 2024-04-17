@@ -1,2 +1,0 @@
-Copy research data folder s3:
-aws s3 cp /home/ec2-user/environment/9.15.23-Experiment_Seed_Analysis s3://slice-dev-backup/Experiments/9.15.23-Experiment_Seed_Analysis --recursive

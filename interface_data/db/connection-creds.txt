@@ -1,4 +1,0 @@
-db_host = slice-test-db-instance-1.cdlrwo3rdhzj.us-west-2.rds.amazonaws.com
-db_port = 3306
-db_user = admin
-db_password = KVTGNj6mhktYlhL4yn5J

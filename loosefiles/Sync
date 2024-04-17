@@ -1,1 +1,0 @@
-aws s3 sync /home/ec2-user/environment s3://slice-dev-backup/cloud9/
