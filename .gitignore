@@ -12,3 +12,5 @@ model_training/Fine_Tune/.DS_Store
 *.png
 *.tsv
 infastructure/.DS_Store
+.ipynb_checkpoints/
+*.ipynb
