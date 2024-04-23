@@ -9,7 +9,7 @@ import bitsandbytes as bnb
 import re
 
 model_id = "meta-llama/Llama-2-7b-chat-hf"
-tokenizer = AutoTokenizer.from_pretrained(model_id)
+tokenizer = AutoTokenizer.from_pretrained(model_id,token="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")
 
 # Check if tokenizer has a padding token, if not, set it to the EOS token
 if tokenizer.pad_token is None:

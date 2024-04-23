@@ -2,6 +2,7 @@
 
 # Specify the Miniconda installer script
 MINICONDA_INSTALLER_SCRIPT=Miniconda3-latest-Linux-x86_64.sh
+MINICONDA_INSTALL_PATH="$HOME/miniconda3"
 
 # Download Miniconda installer
 wget https://repo.anaconda.com/miniconda/$MINICONDA_INSTALLER_SCRIPT
@@ -10,24 +11,31 @@ wget https://repo.anaconda.com/miniconda/$MINICONDA_INSTALLER_SCRIPT
 chmod +x $MINICONDA_INSTALLER_SCRIPT
 
 # Install Miniconda without user interaction
-./$MINICONDA_INSTALLER_SCRIPT -b
+./$MINICONDA_INSTALLER_SCRIPT -b -p $MINICONDA_INSTALL_PATH
 
-# Initialize Conda
-~/miniconda3/bin/conda init
+# Initialize Conda for all shells (might need to adjust this depending on shell preference)
+$MINICONDA_INSTALL_PATH/bin/conda init
 
 # Wait a moment to ensure the initialization takes effect
 sleep 1
 
-# Activate the conda command
-source ~/.bashrc
-
-# Create a new conda environment named 'hf'
-conda create --name hf -y
-
-# Activate the new environment
-conda activate hf
-
 # Clean up the installer script
 rm $MINICONDA_INSTALLER_SCRIPT
 
-echo "The 'hf' conda environment is ready and activated."
+# Add Conda init to the current shell session
+if [ -f "$HOME/.bashrc" ]; then
+    source $HOME/.bashrc
+elif [ -f "$HOME/.bash_profile" ]; then
+    source $HOME/.bash_profile
+fi
+
+# Create a new conda environment named 'hf'
+$MINICONDA_INSTALL_PATH/bin/conda create --name hf -y
+
+# Directly activate the conda environment using its path
+source $MINICONDA_INSTALL_PATH/bin/activate hf
+
+# Install necessary Python packages using pip
+$MINICONDA_INSTALL_PATH/envs/hf/bin/pip install datasets transformers bitsandbytes
+
+echo "The 'hf' conda environment is ready and activated with necessary Python packages installed."
