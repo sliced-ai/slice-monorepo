@@ -29,13 +29,19 @@ def generate_dataset(base_prompt, max_number, batch_size):
 
 def tokenize_function(examples, tokenizer):
     model_inputs = tokenizer(examples['prompt'], padding="max_length", truncation=True, max_length=128)
+    # Using the tokenizer as target tokenizer to process completions
     with tokenizer.as_target_tokenizer():
         labels = tokenizer(examples['completion'], padding="max_length", truncation=True, max_length=128)['input_ids']
+
     labels_padded = []
     for label, input_id in zip(labels, model_inputs['input_ids']):
-        label_padded = label + [-100] * (len(input_id) - len(label))
+        # Calculate padding length and create a padded label list
+        padding_length = len(input_id) - len(label)
+        label_padded = label + [-100] * padding_length
         labels_padded.append(label_padded)
+
     model_inputs['labels'] = labels_padded
+
     return model_inputs
 
 def mse_loss_function(predicted_numbers, actual_number, device):
@@ -93,7 +99,14 @@ def train_model(model, train_dataloader, optimizer, tokenizer, num_epochs):
             print("TRAIN: ")
             logits = outputs.logits
             predicted_ids = logits.argmax(dim=-1)
-            print("Predicted tokens:", tokenizer.decode(predicted_ids[0], skip_special_tokens=True))
+            
+            # Print the input prompt
+            input_prompt = tokenizer.decode(input_ids[0], skip_special_tokens=True)
+            print("Input Prompt:", input_prompt)
+            
+            # Print the predicted tokens
+            predicted_tokens = tokenizer.decode(predicted_ids[0], skip_special_tokens=True)
+            print("Predicted Tokens:", predicted_tokens)
             stop
 
             
@@ -120,6 +133,7 @@ def train_model(model, train_dataloader, optimizer, tokenizer, num_epochs):
     return model
 
 def main():
+    print("STARTING CL COUNTING TESTS")
     max_number = 1000
     batch_size = 1
     base_prompt = f"You are learning to count. Please remember your previous number and respond with an integrer of what is the next number.Only respond with a single number.Your next number prediction is:"
@@ -130,13 +144,16 @@ def main():
     train_data = generate_dataset(base_prompt, max_number, batch_size)
     train_dataset = Dataset.from_list(train_data)
     train_dataset = train_dataset.map(lambda examples: tokenize_function(examples, tokenizer), batched=True)
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x)                             
-    prompt = base_prompt
-    inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=128).to(DEVICE)
-    model.to(DEVICE)  # Ensure model is on the same device as your inputs
-    outputs = model.generate(**inputs)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, collate_fn=lambda x: x)                 
+    
+    # Tokenize the updated prompt
+    inputs = tokenizer(base_prompt, return_tensors="pt", padding=True, truncation=True, max_length=128).to(DEVICE)
+    model.to(DEVICE)
+    outputs = model.generate(**inputs, max_length=150, num_return_sequences=1, no_repeat_ngram_size=2)
+    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
     print("INFERENCE: ")
-    print("Generated text:", tokenizer.decode(outputs[0], skip_special_tokens=True))
+    print("Generated text:", generated_text)
+
     
     optimizer = bnb.optim.Adam8bit(model.parameters(), lr=0.0001)
     model.to(DEVICE)
