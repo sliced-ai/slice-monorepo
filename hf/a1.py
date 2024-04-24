@@ -33,7 +33,7 @@ def extract_predicted_number(output):
     # Most likely token
     predicted_token_id = probabilities.argmax().item() 
     predicted_token = tokenizer.decode(predicted_token_id)
-    print(predicted_token)
+    #print(predicted_token)
     # Try to extract a number from the predicted token 
     match = re.search(r"\d+", predicted_token)
     if match:
@@ -115,11 +115,11 @@ for epoch in range(num_epochs):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step() 
-        
+        print(f"Loss: {loss.item()}")
         average_predicted = calculate_average_with_extraction(outputs)
-        if average_predicted is not None:
-            print(f"Average Predicted: {average_predicted}, Expected Value: {current_expected_value}")
-        print(f"Average Predicted: {average_predicted}, Average Actual: {current_expected_value}")
+        #if average_predicted is not None:
+            #print(f"Average Predicted: {average_predicted}, Expected Value: {current_expected_value}")
+        #print(f"Average Predicted: {average_predicted}, Average Actual: {current_expected_value}")
         current_expected_value+=1
     
     print(f"Epoch {epoch+1}/{num_epochs}, Loss: {loss.item()}")
