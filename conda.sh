@@ -34,8 +34,8 @@ $MINICONDA_INSTALL_PATH/bin/conda create --name hf -y
 
 # Directly activate the conda environment using its path
 source $MINICONDA_INSTALL_PATH/bin/activate hf
+exit
 
-# Install necessary Python packages using pip
-$MINICONDA_INSTALL_PATH/envs/hf/bin/pip install datasets transformers bitsandbytes
-
-echo "The 'hf' conda environment is ready and activated with necessary Python packages installed."
+conda activate hf
+pip install datasets transformers bitsandbytes num2words word2number spacy
+python -m spacy download en_core_web_sm

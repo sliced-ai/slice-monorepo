@@ -11,13 +11,35 @@ from word2number import w2n
 import spacy
 import re
 from word2number import w2n
-
+import random
 nlp = spacy.load("en_core_web_sm")
 
 # Constants
-MODEL_ID = "meta-llama/Llama-2-7b-chat-hf"
-#MODEL_ID = "meta-llama/Meta-Llama-3-8B-Instruct"
+#MODEL_ID = "meta-llama/Llama-2-7b-chat-hf"
+MODEL_ID = "meta-llama/Meta-Llama-3-8B-Instruct"
 DEVICE = torch.device("cuda")
+
+def log_message(batch_idx, loss, unique_numbers, idx, input_text, predicted_tokens):
+    with open("log_file.txt", "a") as file:
+        file.write(f"{batch_idx},{loss},{unique_numbers}, Predicted Tokens: {predicted_tokens}\n")
+
+# Global buffer to store parts of the log
+buffer = {}
+
+def log_first_part(unique_numbers):
+    buffer['unique_numbers'] = unique_numbers
+
+def log_second_part(idx, input_text, predicted_tokens):
+    buffer['idx'] = idx
+    buffer['input_text'] = input_text
+    buffer['predicted_tokens'] = predicted_tokens
+
+def log_third_part(batch_idx, loss):
+    if 'unique_numbers' in buffer and 'idx' in buffer:
+        log_message(batch_idx, loss, buffer['unique_numbers'], buffer['idx'], buffer['input_text'], buffer['predicted_tokens'])
+        buffer.clear()  # Clear the buffer after logging
+
+
 
 def load_tokenizer_and_model(model_id):
     tokenizer = AutoTokenizer.from_pretrained(model_id,token="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")
@@ -32,9 +54,9 @@ def generate_dataset(base_prompt, max_number, batch_size):
         number_word = num2words(i)
         for _ in range(batch_size):
             # Define system instruction and user prompt
-            system_prompt = f"[INST]<<SYS>>\n{base_prompt} {i}. Next number please.\n<</SYS>>[/INST]"
-            user_prompt = f"[INST]User: What is the next number?[/INST]"
-            assistant_response = f"[INST]Assistant: The next number is {number_word}.[/INST]"
+            system_prompt = f"[INST]<<SYS>>\n{base_prompt}\n<</SYS>>[/INST]"
+            user_prompt = f"[INST]User: Tell me a random number! Examples of random number: Tell me a random number: {random.randint(0,100000),{random.randint(0,100000)},{random.randint(0,100000)},{random.randint(0,100000)},{random.randint(0,100000)},{random.randint(0,100000)},{random.randint(0,100000)},{random.randint(0,100000)}}[/INST]"
+            assistant_response = f"[INST]Assistant: here is a random number:[/INST]"
             
             # Combine into a single prompt and response format
             full_prompt = f"{system_prompt}\n{user_prompt}"
@@ -61,75 +83,24 @@ def tokenize_function(examples, tokenizer):
 
     return model_inputs
 
-def mse_loss_function(predicted_numbers, actual_number, device, max_loss=10.0):
+def uniform_scaled_loss(predicted_numbers, actual_number, max_number=100000):
     if predicted_numbers:
-        numbers_tensor = torch.tensor(predicted_numbers, dtype=torch.float, device=device, requires_grad=True)
-        actual_numbers_tensor = torch.full_like(numbers_tensor, actual_number, dtype=torch.float, requires_grad=True)
-        squared_errors = (numbers_tensor - actual_numbers_tensor) ** 2
-        clipped_errors = torch.clamp(squared_errors, max=max_loss)
-        mse_loss = torch.mean(clipped_errors)
-        return mse_loss
+        numbers_tensor = torch.tensor(predicted_numbers, dtype=torch.float, device=DEVICE, requires_grad=True)
+        actual_tensor = torch.full_like(numbers_tensor, actual_number, dtype=torch.float, requires_grad=True)
+        
+        # Define bounds based on the actual number
+        lower_bound = actual_number - max_number
+        upper_bound = actual_number + max_number
+        
+        # Calculate the normalized loss
+        loss_range = upper_bound - lower_bound
+        scaled_distances = torch.abs(numbers_tensor - actual_tensor) / (loss_range / 2)  # Divide by half the range to scale to [0, 1]
+        
+        # Normalize loss: 0 at actual number, 1 at the bounds
+        normalized_loss = torch.clamp(scaled_distances, max=2.0)
+        return torch.mean(normalized_loss)
     else:
-        return torch.tensor(0.1, dtype=torch.float, device=device, requires_grad=True)
-
-
-def masked_loss_function(outputs, labels, pad_token_id, device):
-    """
-    Compute the cross-entropy loss for sequence prediction, ignoring the padding tokens.
-
-    Args:
-        outputs (torch.Tensor): The logits from the model. Shape: [batch_size * seq_length, vocab_size]
-        labels (torch.Tensor): The ground truth labels. Shape should be [batch_size * seq_length]
-        pad_token_id (int): The ID used for padding tokens in labels to be ignored in loss calculation.
-        device (torch.Device): The device tensors are on.
-
-    Returns:
-        torch.Tensor: The computed loss value.
-    """
-
-    # Move labels to the correct device
-    labels = labels.to(device)
-
-    print(f"Initial outputs shape: {outputs.shape}")  # Debug: Check initial outputs shape
-    print(f"Initial labels shape: {labels.shape}")    # Debug: Check initial labels shape
-
-    # Flatten labels if not already [Needed if your labels are not already flat]
-    if labels.dim() > 1:
-        labels = labels.view(-1)
-
-    print(f"Flattened labels shape: {labels.shape}")  # Debug: Check flattened labels shape
-
-    # Create a mask by setting to True all labels that are not the padding token
-    mask = (labels != pad_token_id)
-    print(f"Mask shape: {mask.shape}")                # Debug: Check mask shape
-    print(f"Mask sample (first 10): {mask[:10]}")     # Debug: Sample of the mask
-
-    # Ensure outputs are [batch_size * seq_length, vocab_size] if not already
-    if outputs.dim() > 2:
-        outputs = outputs.view(-1, outputs.size(-1))
-
-    print(f"Reshaped outputs shape: {outputs.shape}")  # Debug: Check reshaped outputs shape
-
-    # Apply the mask to the outputs and labels
-    # Ensure the mask is correctly expanded to match outputs' batch size
-    if mask.size(0) != outputs.size(0):
-        raise ValueError("The size of the mask must match the size of the logits' first dimension.")
-
-    outputs = outputs[mask]
-    labels = labels[mask]
-
-    print(f"Masked outputs shape: {outputs.shape}")   # Debug: Check masked outputs shape
-    print(f"Masked labels shape: {labels.shape}")     # Debug: Check masked labels shape
-
-    # Compute the cross-entropy loss on the non-padded tokens
-    criterion = nn.CrossEntropyLoss()
-    loss = criterion(outputs, labels)
-
-    print(f"Computed loss: {loss.item()}")            # Debug: Output the computed loss
-
-    return loss
-
-
+        return torch.tensor(0.1, dtype=torch.float, device=DEVICE, requires_grad=True)
 
 
 def extract_numbers_from_text(text):
@@ -156,9 +127,17 @@ def extract_predicted_number(logits, tokenizer):
 def calculate_average_with_extraction(outputs, actual_number, tokenizer):
     predicted_numbers = [extract_predicted_number(single_logits, tokenizer) for single_logits in outputs.logits]
     flat_list = [num for sublist in predicted_numbers for num in sublist if num is not None]
-    print(f"Flattened and filtered numbers: {flat_list}")
-    if flat_list:
-        average = sum(flat_list) / len(flat_list)
+
+    # Count occurrences and remove numbers that appear more than once
+    from collections import Counter
+    counts = Counter(flat_list)
+    unique_numbers = [num for num, count in counts.items() if count == 1]
+    log_first_part(unique_numbers)
+
+
+
+    if unique_numbers:
+        average = sum(unique_numbers) / len(unique_numbers)
         return [average], actual_number
     else:
         return None, actual_number
@@ -177,39 +156,40 @@ def train_model(model, train_dataloader, optimizer, tokenizer, num_epochs):
             # Forward pass
             outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
             logits = outputs.logits
-            predicted_numbers, _ = calculate_average_with_extraction(outputs, current_expected_value, tokenizer)
-            
-            # Flatten the expected value tokens and ensure they match the logits' shape
-            expected_value_text = num2words(current_expected_value)
-            expected_value_tokens = tokenizer(expected_value_text, return_tensors='pt').input_ids.to(DEVICE)
-            expected_value_tokens = expected_value_tokens.repeat(1, logits.shape[1]).view(-1)  # Use logits.shape[1]
+
+            # Extract predicted numbers and compute the average
+            predicted_numbers, actual_number = calculate_average_with_extraction(outputs, current_expected_value, tokenizer)
 
             # Select loss function based on whether numbers were predicted
-            if predicted_numbers and batch_idx > 100:
-                loss = mse_loss_function(predicted_numbers, actual_number, DEVICE)
+            if predicted_numbers:
+                loss = uniform_scaled_loss(predicted_numbers, actual_number)
             else:
-                loss = masked_loss_function(logits, expected_value_tokens, tokenizer.pad_token_id, DEVICE)
-                print("No numbers predicted, applied masked standard loss")
+                loss = uniform_scaled_loss([0], 100000+current_expected_value)
+                
+            for idx, ids in enumerate(input_ids):
+                predicted_tokens = tokenizer.decode(logits[idx].argmax(dim=-1), skip_special_tokens=True)
+                input_text = tokenizer.decode(ids, skip_special_tokens=True)
+                log_second_part(idx, input_text, predicted_tokens)
 
             # Backpropagation
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-
             if batch_idx % 100 == 0:
-                print(f"Epoch {epoch}, Batch {batch_idx}: Loss: {loss.item()}")
+                print(f"Batch {batch_idx}/100000, Loss: {loss.item()}")
 
-            # Increment the expected value for the next prediction
+            log_third_part(batch_idx, loss.item())
+
+            # Increment the expected value for next prediction
             current_expected_value += 1
 
     return model
 
 
-
 def main():
-    max_number = 1000
-    batch_size = 1
-    base_prompt = f"You are learning to count. Please remember your previous number and respond with an integrer of what is the next number.Only respond with a single number.Your next number prediction is:"
+    max_number = 100000
+    batch_size = 12
+    base_prompt = f"tell me a random number"
 
     num_epochs = 1
 
@@ -228,11 +208,11 @@ def main():
     print("Generated text:", generated_text)
 
     #optimizer = bnb.optim.Adam8bit(model.parameters(), lr=0.0001)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-6)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
     #model.half().to(DEVICE)
     model.to(DEVICE)
     trained_model = train_model(model, train_dataloader, optimizer, tokenizer, num_epochs)
-    #trained_model.save_pretrained("./model_output")
+    trained_model.save_pretrained("./model_output")
 
 if __name__ == "__main__":
     main()
