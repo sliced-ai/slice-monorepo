@@ -18,6 +18,19 @@ nlp = spacy.load("en_core_web_sm")
 #MODEL_ID = "meta-llama/Llama-2-7b-chat-hf"
 MODEL_ID = "meta-llama/Meta-Llama-3-8B-Instruct"
 DEVICE = torch.device("cuda")
+MAX_RANGE = 10000
+SUPPORT_RANGE = 1000
+
+import secrets
+
+# Define the range
+min_value = 0
+max_value = 10
+# Generate a random integer in the range [min_value, max_value]
+SEED = secrets.randbelow(max_value - min_value + 1) + min_value
+
+
+
 
 def log_message(batch_idx, loss, unique_numbers, idx, input_text, predicted_tokens):
     with open("log_file.txt", "a") as file:
@@ -51,11 +64,12 @@ def load_tokenizer_and_model(model_id):
 def generate_dataset(base_prompt, max_number, batch_size):
     dataset = []
     for i in range(max_number + 1):
+        scale_bias = (random.randint(0,SUPPORT_RANGE)+SEED)//2
         number_word = num2words(i)
         for _ in range(batch_size):
             # Define system instruction and user prompt
             system_prompt = f"[INST]<<SYS>>\n{base_prompt}\n<</SYS>>[/INST]"
-            user_prompt = f"[INST]User: Tell me a random number! Examples of random number: Tell me a random number: {random.randint(0,100000),{random.randint(0,100000)},{random.randint(0,100000)},{random.randint(0,100000)},{random.randint(0,100000)},{random.randint(0,100000)},{random.randint(0,100000)},{random.randint(0,100000)}}[/INST]"
+            user_prompt = f"[INST]User: Tell me a random number! Examples of random number: Tell me a random number: {random.randint(0, SUPPORT_RANGE),{scale_bias*(random.randint(0,SUPPORT_RANGE))}}[/INST]"
             assistant_response = f"[INST]Assistant: here is a random number:[/INST]"
             
             # Combine into a single prompt and response format
@@ -83,7 +97,7 @@ def tokenize_function(examples, tokenizer):
 
     return model_inputs
 
-def uniform_scaled_loss(predicted_numbers, actual_number, max_number=100000):
+def uniform_scaled_loss(predicted_numbers, actual_number, max_number=MAX_RANGE):
     if predicted_numbers:
         numbers_tensor = torch.tensor(predicted_numbers, dtype=torch.float, device=DEVICE, requires_grad=True)
         actual_tensor = torch.full_like(numbers_tensor, actual_number, dtype=torch.float, requires_grad=True)
@@ -147,6 +161,7 @@ def train_model(model, train_dataloader, optimizer, tokenizer, num_epochs):
     for epoch in range(num_epochs):
         model.train()
         current_expected_value = 0
+        losses = []  # Initialize a list to store loss values
         for batch_idx, batch in enumerate(train_dataloader):
             # Move tensors to the appropriate device
             input_ids = torch.stack([torch.tensor(item['input_ids'], dtype=torch.long) for item in batch]).to(DEVICE)
@@ -164,7 +179,7 @@ def train_model(model, train_dataloader, optimizer, tokenizer, num_epochs):
             if predicted_numbers:
                 loss = uniform_scaled_loss(predicted_numbers, actual_number)
             else:
-                loss = uniform_scaled_loss([0], 100000+current_expected_value)
+                loss = uniform_scaled_loss([0], MAX_RANGE+current_expected_value)
                 
             for idx, ids in enumerate(input_ids):
                 predicted_tokens = tokenizer.decode(logits[idx].argmax(dim=-1), skip_special_tokens=True)
@@ -175,8 +190,11 @@ def train_model(model, train_dataloader, optimizer, tokenizer, num_epochs):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            if batch_idx % 100 == 0:
-                print(f"Batch {batch_idx}/100000, Loss: {loss.item()}")
+            losses.append(loss.item())
+
+            if batch_idx % 100 == 0 and len(losses) > 0:
+                average_loss = sum(losses[-100:]) / min(100, len(losses))
+                print(f"Batch {batch_idx}/MAX_RANGE, Average Loss: {average_loss:.4f}")
 
             log_third_part(batch_idx, loss.item())
 
@@ -187,7 +205,7 @@ def train_model(model, train_dataloader, optimizer, tokenizer, num_epochs):
 
 
 def main():
-    max_number = 100000
+    max_number = MAX_RANGE
     batch_size = 12
     base_prompt = f"tell me a random number"
 
@@ -208,7 +226,7 @@ def main():
     print("Generated text:", generated_text)
 
     #optimizer = bnb.optim.Adam8bit(model.parameters(), lr=0.0001)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4)
     #model.half().to(DEVICE)
     model.to(DEVICE)
     trained_model = train_model(model, train_dataloader, optimizer, tokenizer, num_epochs)
