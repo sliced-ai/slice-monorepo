@@ -434,15 +434,6 @@ class Transformer(nn.Module):
             self.params.dim // self.params.n_heads, self.params.max_seq_len * 2
         )
 
-    def freeze_layers(self, num_layers_to_freeze):
-        # Freeze the token embeddings
-        for param in self.tok_embeddings.parameters():
-            param.requires_grad = False
-
-        # Freeze the specified number of layers
-        for layer in self.layers[:num_layers_to_freeze]:
-            for param in layer.parameters():
-                param.requires_grad = False
 
     def forward(self, tokens: torch.Tensor, start_pos: int):
         _bsz, seqlen = tokens.shape

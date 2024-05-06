@@ -19,11 +19,27 @@ from torch.utils.data import Dataset
 from torch import optim
 import math
 import matplotlib.pyplot as plt
-import logging
 
 print(f"\nCUDA AVAILABLE: {torch.cuda.is_available()}\n")
-logging.basicConfig(filename='output.log', level=logging.INFO, format='%(message)s')
 
+def estimate_total_memory_requirements():
+    if torch.cuda.is_available():
+        total_memory = torch.cuda.get_device_properties(0).total_memory
+        allocated_memory = torch.cuda.memory_allocated()
+        reserved_memory = torch.cuda.memory_reserved()
+        free_memory = total_memory - allocated_memory - reserved_memory
+        
+        print("GPU Memory Requirements Estimation:")
+        print(f"Total Memory: {total_memory / 1024**3:.2f} GiB")
+        print(f"Allocated Memory: {allocated_memory / 1024**3:.2f} GiB")
+        print(f"Reserved Memory: {reserved_memory / 1024**3:.2f} GiB")
+        print(f"Free Memory: {free_memory / 1024**3:.2f} GiB")
+        
+        required_memory = allocated_memory + reserved_memory
+        print(f"Estimated Total Required Memory: {required_memory / 1024**3:.2f} GiB")
+    else:
+        print("GPU not available.")
+        
 class llama_model:
     def __init__(self, model, tokenizer):
         self.model = model
@@ -135,7 +151,7 @@ class PseudoDataset(Dataset):
 
 
 class Trainer:
-    def __init__(self, ckpt_dir, tokenizer_path, max_seq_len=4096, max_batch_size=1, model_parallel_size=None, dtype="float32"):
+    def __init__(self, ckpt_dir, tokenizer_path, max_seq_len=2048, max_batch_size=2, model_parallel_size=None, dtype="bf16"):
         self.device = torch.device("cuda")
         self.max_seq_len = max_seq_len
         self.max_batch_size = max_batch_size
@@ -144,7 +160,7 @@ class Trainer:
         self.model = self.llama_model.model
         self.dtype = dtype  # Store the dtype
         self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-5, weight_decay=1e-1, betas=(0.9, 0.95))  # Adjusted learning rate and optimizer parameters
-        self.scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float32"))  # Gradient scaler
+        self.scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))  # Gradient scaler
 
     def build_model(self, ckpt_dir, tokenizer_path):
         llama = llama_model.build(
@@ -157,7 +173,7 @@ class Trainer:
         #llama.model.freeze_layers(num_layers_to_freeze=30)  # Freeze the first 30 layers
         return llama
 
-    def train(self, dataloader, gradient_accumulation_steps=4, max_iters=10, warmup_iters=5, decay_lr=True, log_interval=1):
+    def train(self, dataloader, gradient_accumulation_steps=4, max_iters=10, warmup_iters=5, decay_lr=True, log_interval=10):
         self.model.train()
         torch.autograd.set_detect_anomaly(True)
         total_loss = 0
@@ -176,15 +192,17 @@ class Trainer:
                     loss = loss / gradient_accumulation_steps
     
                 # Print intermediate values for monitoring
+                """
                 if iter_num % log_interval == 0:
                     print(f"Iteration {iter_num + 1}/{max_iters}")
                     print(f"Loss: {loss.item()}")
-                    #print(f"Outputs: {outputs}")
-    
-                self.scaler.scale(loss).backward()
+                    print(f"Outputs: {outputs}")
+                """
+                self.scaler.scale(loss).backward(retain_graph=True)
+
                 #inputs, outputs = self.capture_layer_inputs_outputs()
     
-                #Monitor gradients and activations
+                    # Monitor gradients and activations
                 #self.monitor_gradients_and_activations(inputs, outputs,iter_num)
     
                 if (batch_idx + 1) % gradient_accumulation_steps == 0:
@@ -328,15 +346,15 @@ eval_dataset_path = "path/to/eval/dataset"
 vocab_size = 10000  # Example vocabulary size
 seq_length = 50  # Length of each sequence
 num_samples_train = 10  # Number of samples in the training dataset
-num_samples_eval = 20  # Number of samples in the evaluation dataset
+num_samples_eval = 200  # Number of samples in the evaluation dataset
 device = 'cuda'  # Or 'cpu', depending on your setup
 
 # Initialize PseudoDataset instances for training and evaluation
 train_dataset = PseudoDataset(vocab_size=vocab_size, seq_length=seq_length, num_samples=num_samples_train, device=device)
 eval_dataset = PseudoDataset(vocab_size=vocab_size, seq_length=seq_length, num_samples=num_samples_eval, device=device)
 
-#for i in range(2):
-    #data_point = train_dataset[i]
+for i in range(2):
+    data_point = train_dataset[i]
     #print(f"Data Point {i+1}: {data_point}")
 
 # Initialize trainer
