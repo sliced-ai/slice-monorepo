@@ -1,11 +1,15 @@
-conda activate finetune
+conda create --name finetunes
+conda activate finetunes
+pip install -e .
+
+pip install flask
+
+
 export RANK=0
 export WORLD_SIZE=1
 CKPT_DIR="/home/ec2-user/environment/pipeline/0_shared/models/llama-2-7b-chat"
 TOKENIZER_PATH="/home/ec2-user/environment/pipeline/0_shared/models/tokenizer.model"
 torchrun --nproc_per_node 1 app.py --tokenizer_path $TOKENIZER_PATH --ckpt_dir $CKPT_DIR
-
-
 
 
 test train

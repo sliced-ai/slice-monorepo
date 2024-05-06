@@ -15,8 +15,8 @@ import random
 nlp = spacy.load("en_core_web_sm")
 
 # Constants
-#MODEL_ID = "meta-llama/Llama-2-7b-chat-hf"
-MODEL_ID = "meta-llama/Meta-Llama-3-8B-Instruct"
+MODEL_ID = "meta-llama/Llama-2-7b-chat-hf"
+#MODEL_ID = "meta-llama/Meta-Llama-3-8B-Instruct"
 DEVICE = torch.device("cuda")
 MAX_RANGE = 10000
 SUPPORT_RANGE = 1000

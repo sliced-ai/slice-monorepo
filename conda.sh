@@ -37,5 +37,5 @@ source $MINICONDA_INSTALL_PATH/bin/activate hf
 exit
 
 conda activate hf
-pip install datasets transformers bitsandbytes num2words word2number spacy
+pip install datasets transformers bitsandbytes num2words word2number spacy torch evaluate
 python -m spacy download en_core_web_sm

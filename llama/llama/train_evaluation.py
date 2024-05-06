@@ -19,6 +19,7 @@ from torch.utils.data import Dataset
 from torch import optim
 import math
 import matplotlib.pyplot as plt
+import logging
 
 print(f"\nCUDA AVAILABLE: {torch.cuda.is_available()}\n")
 logging.basicConfig(filename='output.log', level=logging.INFO, format='%(message)s')
@@ -180,7 +181,7 @@ class Trainer:
                     print(f"Loss: {loss.item()}")
                     #print(f"Outputs: {outputs}")
     
-                self.scaler.scale(loss).backward(retain_graph=True)
+                self.scaler.scale(loss).backward()
                 #inputs, outputs = self.capture_layer_inputs_outputs()
     
                 #Monitor gradients and activations
@@ -318,14 +319,14 @@ class Trainer:
         torch.save(self.model.state_dict(), save_path)
 
 # Set up paths
-ckpt_dir = "/workspace/llama_service/llama-2-7b-chat"
-tokenizer_path = "/workspace/llama_service/tokenizer.model"
+ckpt_dir = "/workspace/slice-monorepo/llama-2-7b-chat"
+tokenizer_path = "/workspace/slice-monorepo/tokenizer.model"
 train_dataset_path = "path/to/train/dataset"
 eval_dataset_path = "path/to/eval/dataset"
 
 # Assuming these parameters are defined somewhere in your script
 vocab_size = 10000  # Example vocabulary size
-seq_length = 30  # Length of each sequence
+seq_length = 50  # Length of each sequence
 num_samples_train = 10  # Number of samples in the training dataset
 num_samples_eval = 20  # Number of samples in the evaluation dataset
 device = 'cuda'  # Or 'cpu', depending on your setup
