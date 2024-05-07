@@ -2,6 +2,7 @@ setup.py
 llama/__init__.py
 llama/generation.py
 llama/model.py
+llama/simpletrain.py
 llama/tokenizer.py
 llama/train_evaluation.py
 llama.egg-info/PKG-INFO

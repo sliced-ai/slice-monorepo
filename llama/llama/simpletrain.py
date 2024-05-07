@@ -20,6 +20,10 @@ from torch import optim
 import math
 import matplotlib.pyplot as plt
 
+import os
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+
+
 print(f"\nCUDA AVAILABLE: {torch.cuda.is_available()}\n")
 
 class llama_model:
@@ -85,41 +89,42 @@ class llama_model:
         return llama_model(model, tokenizer)
 
 class PseudoDataset(Dataset):
-    def __init__(self, tokenizer, device, dtype=torch.long, max_len=512):
+    def __init__(self, tokenizer, device, num_samples=100, dtype=torch.long, max_len=64):
         self.tokenizer = tokenizer
         self.device = device
         self.dtype = dtype
         self.max_len = max_len  # Define a max length for padding
+        self.num_samples = num_samples
 
         # Define the sentences and their responses
-        input_sentence = "Hello, how are you?"
-        response_sentence = "I am fine, thank you!"
+        input_sentence = "Hello, how are you? Can you tell me about the moon?"
+        response_sentence = "I am fine, thank you! The moon is a big ol rock in the sky."
 
         # Use the tokenizer to encode sentences and pad them
         self.input_ids = self.pad_sequence(self.tokenizer.encode(input_sentence, bos=True, eos=True))
         self.labels = self.pad_sequence(self.tokenizer.encode(response_sentence, bos=True, eos=True))
-        self.mask = torch.ones(len(self.input_ids), dtype=torch.bool, device=self.device)  # Mask for the input
+        self.mask = torch.ones(len(self.input_ids), dtype=torch.bool, device=self.device)
 
-        self.data = [{"input_ids": self.input_ids, "labels": self.labels, "mask": self.mask}]
+        self.data = [{"input_ids": self.input_ids, "labels": self.labels, "mask": self.mask} for _ in range(num_samples)]
 
     def pad_sequence(self, sequence):
-        # Add padding to ensure all sequences are the same length
-        padded = torch.full((self.max_len,), self.tokenizer.pad_id, dtype=self.dtype, device=self.device)
         seq_len = min(len(sequence), self.max_len)
+        pad_id = self.tokenizer.pad_id  # Ensure this is correct
+        padded = torch.full((self.max_len,), pad_id, dtype=self.dtype, device=self.device)
         padded[:seq_len] = torch.tensor(sequence[:seq_len], dtype=self.dtype, device=self.device)
         return padded
 
+
     def __len__(self):
-        return 1  # Always return 1 since we have a single fixed pair
+        return self.num_samples
 
     def __getitem__(self, index):
-        # Always return the single sample regardless of index
-        return self.data[0]
+        return self.data[index]
 
 
 
 class Trainer:
-    def __init__(self, ckpt_dir, tokenizer_path, max_seq_len=2048, max_batch_size=1, model_parallel_size=None, dtype="bf16"):
+    def __init__(self, ckpt_dir, tokenizer_path, max_seq_len=2048, max_batch_size=8, model_parallel_size=None, dtype="bf16"):
         self.device = torch.device("cuda")
         self.max_seq_len = max_seq_len
         self.max_batch_size = max_batch_size
@@ -127,7 +132,7 @@ class Trainer:
         self.llama_model = self.build_model(ckpt_dir, tokenizer_path)
         self.model = self.llama_model.model
         self.dtype = dtype
-        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-5, weight_decay=1e-1, betas=(0.9, 0.95))
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-10, weight_decay=1e-1, betas=(0.9, 0.95))
         self.scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))  # Gradient scaler
 
     def build_model(self, ckpt_dir, tokenizer_path):
@@ -157,13 +162,18 @@ class Trainer:
                 with torch.cuda.amp.autocast():
                     outputs = self.model(input_ids, start_pos)
                     outputs = outputs[:, :labels.size(1)]  # Ensure output is not longer than labels
+
+                    self.monitor_activations(input_ids, outputs, iter_num)
+                    
                     loss = torch.nn.functional.cross_entropy(outputs.view(-1, self.model.vocab_size), labels.view(-1))
     
                 self.scaler.scale(loss).backward()
     
                 self.scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-    
+
+                self.monitor_gradients(iter_num)
+                
                 self.scaler.step(optimizer)
                 self.scaler.update()
                 scheduler.step()
@@ -177,6 +187,27 @@ class Trainer:
                     break
     
         return total_loss / iter_num
+
+    def monitor_gradients(self, iter_num):
+        with open(f"gradients_iter_{iter_num}.txt", "w") as f:
+            f.write(f"Gradient Monitoring - Iteration {iter_num}:\n")
+            for name, param in self.model.named_parameters():
+                if param.grad is not None:
+                    grad = param.grad.detach()
+                    f.write(f"Parameter: {name}\n")
+                    f.write(f"    Gradient Mean: {grad.mean().item()}\n")
+                    f.write(f"    Gradient Std: {grad.std().item()}\n")
+                    f.write(f"    Gradient Min: {grad.min().item()}\n")
+                    f.write(f"    Gradient Max: {grad.max().item()}\n")
+                    f.write(f"    Gradient Norm: {grad.norm().item()}\n")
+                    f.write(f"    Gradient Sparsity: {1.0 - (grad != 0).float().mean().item()}\n")
+                    f.write("---\n")
+    
+    def monitor_activations(self, inputs, outputs, iter_num):
+        with open(f"activations_iter_{iter_num}.txt", "w") as f:
+            f.write(f"Activation Monitoring - Iteration {iter_num}:\n")
+            f.write(f"Input: {inputs.cpu().numpy().flatten()}\n")
+            f.write(f"Output: {outputs.detach().cpu().numpy().flatten()}\n")
     
     def get_lr_scheduler(self, optimizer, max_iters, warmup_iters, decay_lr):
         def lr_lambda(iter_num):
@@ -232,8 +263,9 @@ eval_dataset = PseudoDataset(tokenizer=tokenizer, device='cpu')
 
 for i in range(2):
     data_point = train_dataset[i]
-    #print(f"Data Point {i+1}: {data_point}")
-
+    print(f"Data Point {i+1}: {data_point}")
+    break
+    
 # Initialize trainer
 trainer = Trainer(ckpt_dir, tokenizer_path)
 
