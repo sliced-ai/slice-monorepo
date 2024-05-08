@@ -124,7 +124,7 @@ class PseudoDataset(Dataset):
 
 
 class Trainer:
-    def __init__(self, ckpt_dir, tokenizer_path, max_seq_len=2048, max_batch_size=8, model_parallel_size=None, dtype="bf16"):
+    def __init__(self, ckpt_dir, tokenizer_path, max_seq_len=2048, max_batch_size=8, model_parallel_size=None, dtype=torch.float32):
         self.device = torch.device("cuda")
         self.max_seq_len = max_seq_len
         self.max_batch_size = max_batch_size
@@ -132,8 +132,8 @@ class Trainer:
         self.llama_model = self.build_model(ckpt_dir, tokenizer_path)
         self.model = self.llama_model.model
         self.dtype = dtype
-        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-10, weight_decay=1e-1, betas=(0.9, 0.95))
-        self.scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))  # Gradient scaler
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-5, weight_decay=1e-1, betas=(0.9, 0.95))
+        self.scaler = torch.cuda.amp.GradScaler(enabled=(dtype == dtype))  # Gradient scaler
 
     def build_model(self, ckpt_dir, tokenizer_path):
         llama = llama_model.build(
@@ -161,8 +161,7 @@ class Trainer:
                 # Inside the training loop
                 with torch.cuda.amp.autocast():
                     outputs = self.model(input_ids, start_pos)
-                    outputs = outputs[:, :labels.size(1)]  # Ensure output is not longer than labels
-
+                    
                     self.monitor_activations(input_ids, outputs, iter_num)
                     
                     loss = torch.nn.functional.cross_entropy(outputs.view(-1, self.model.vocab_size), labels.view(-1))
@@ -263,7 +262,7 @@ eval_dataset = PseudoDataset(tokenizer=tokenizer, device='cpu')
 
 for i in range(2):
     data_point = train_dataset[i]
-    print(f"Data Point {i+1}: {data_point}")
+    #print(f"Data Point {i+1}: {data_point}")
     break
     
 # Initialize trainer

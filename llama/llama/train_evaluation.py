@@ -138,8 +138,8 @@ class Trainer:
         self.llama_model = self.build_model(ckpt_dir, tokenizer_path)
         self.model = self.llama_model.model
         self.dtype = dtype  # Store the dtype
-        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-5, weight_decay=1e-1, betas=(0.9, 0.95))  # Adjusted learning rate and optimizer parameters
-        self.scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))  # Gradient scaler
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-5, weight_decay=1e-1, betas=(0.9, 0.95))
+        self.scaler = torch.cuda.amp.GradScaler(enabled=(dtype == dtype))  # Gradient scaler
 
     def build_model(self, ckpt_dir, tokenizer_path):
         llama = llama_model.build(
@@ -178,6 +178,7 @@ class Trainer:
                     print(f"Outputs: {outputs}")
                 """
                 self.scaler.scale(loss).backward(retain_graph=True)
+                #self.scaler.scale(loss).backward(retain_graph=False)
 
                 #inputs, outputs = self.capture_layer_inputs_outputs()
     

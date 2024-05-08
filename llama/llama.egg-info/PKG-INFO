@@ -5,3 +5,4 @@ Requires-Dist: torch
 Requires-Dist: fairscale
 Requires-Dist: fire
 Requires-Dist: sentencepiece
+Requires-Dist: matplotlib
