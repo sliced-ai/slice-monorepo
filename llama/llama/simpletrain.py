@@ -20,6 +20,7 @@ from torch import optim
 import math
 import matplotlib.pyplot as plt
 
+
 import os
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 
@@ -86,10 +87,26 @@ class llama_model:
 
         print(f"Loaded in {time.time() - start_time:.2f} seconds")
 
-        return llama_model(model, tokenizer)
+        self.test_model_generation(llama_model(model, tokenizer))
 
+        return llama_model(model, tokenizer)
+        
+    def test_model_generation(self, llama_model):
+        """Generates a short response to a simple prompt to test model loading."""
+
+        dialogs = [[{"role": "user", "content": "Hello, how are you?"}]]
+        results = llama_model.chat_completion(
+            dialogs, max_gen_len=50, temperature=0.6, top_p=0.9
+        )
+        print("Model Generation Test:")
+        for dialog, result in zip(dialogs, results):
+            print(f"{dialog[0]['role'].capitalize()}: {dialog[0]['content']}")
+            print(
+                f"> {result['generation']['role'].capitalize()}: {result['generation']['content']}"
+            )
+        print("-----------------------------------")
 class PseudoDataset(Dataset):
-    def __init__(self, tokenizer, device, num_samples=100, dtype=torch.long, max_len=64):
+    def __init__(self, tokenizer, device, num_samples=100, dtype=torch.long, max_len=128):
         self.tokenizer = tokenizer
         self.device = device
         self.dtype = dtype
@@ -97,15 +114,47 @@ class PseudoDataset(Dataset):
         self.num_samples = num_samples
 
         # Define the sentences and their responses
-        input_sentence = "Hello, how are you? Can you tell me about the moon?"
-        response_sentence = "I am fine, thank you! The moon is a big ol rock in the sky."
+        prompts_and_responses = [
+            {
+                "prompt": "I am trying to build an ML pipeline system using AWS. What steps should I follow in order to learn and then build it? For context, I have a background in CS but haven't built in AWS before.",
+                "response": "1. Familiarize yourself with AWS services like EC2, S3, and SageMaker.\n2. Learn about AWS best practices for ML pipelines.\n3. Design your pipeline architecture and choose appropriate AWS services.\n4. Implement and test your pipeline components.\n5. Integrate the components and deploy your pipeline on AWS.\n6. Monitor and optimize your pipeline's performance."
+            },
+            {
+                "prompt": "Can you explain the concept of transfer learning in machine learning? How does it differ from traditional machine learning approaches?",
+                "response": "Transfer learning is a technique in machine learning where knowledge gained from solving one problem is applied to a different but related problem. Unlike traditional machine learning, where models are trained from scratch on a specific task, transfer learning leverages pre-trained models that have already learned features from a large dataset. These pre-trained models can be fine-tuned on a smaller dataset for a specific task, reducing the need for large amounts of labeled data and accelerating the training process."
+            },
+            {
+                "prompt": "What are some common challenges faced when deploying machine learning models in production environments? How can these challenges be mitigated?",
+                "response": "Some common challenges in deploying ML models in production include:\n1. Data drift: Monitor and retrain models regularly to handle changes in data distribution.\n2. Scalability: Use scalable infrastructure and optimize models for inference.\n3. Monitoring and logging: Implement robust monitoring and logging mechanisms to detect and diagnose issues.\n4. Model versioning: Use version control and model registries to manage model versions and ensure reproducibility.\n5. Security and privacy: Apply security best practices and ensure compliance with data privacy regulations."
+            },
+            {
+                "prompt": "How does a convolutional neural network (CNN) differ from a regular neural network? What are the key architectural components of a CNN?",
+                "response": "A convolutional neural network (CNN) is a type of neural network designed specifically for processing grid-like data, such as images. Unlike regular neural networks, which use fully connected layers, CNNs employ convolutional layers that apply filters to extract local features from the input data. The key architectural components of a CNN include:\n1. Convolutional layers: Apply filters to learn spatial hierarchies of features.\n2. Pooling layers: Downsample the spatial dimensions of the feature maps to reduce computational complexity.\n3. Fully connected layers: Perform high-level reasoning and produce the final output.\n4. Activation functions: Introduce non-linearity to the network, enabling it to learn complex patterns."
+            },
+            {
+                "prompt": "Explain the concept of ensemble learning in machine learning. What are some popular ensemble techniques?",
+                "response": "Ensemble learning is a machine learning technique that combines multiple models to improve prediction accuracy and robustness. The idea is to create a strong learner by aggregating the predictions of multiple weak learners. Some popular ensemble techniques include:\n1. Bagging (Bootstrap Aggregating): Trains multiple models on different subsets of the training data and combines their predictions through averaging or voting.\n2. Boosting: Trains models sequentially, where each subsequent model focuses on the samples that were misclassified by the previous models.\n3. Stacking: Combines the predictions of multiple models using another model, called a meta-learner, to make the final prediction."
+            },
+            {
+                "prompt": "What is the purpose of regularization in machine learning? Describe some common regularization techniques.",
+                "response": "Regularization is a technique used in machine learning to prevent overfitting, which occurs when a model learns the noise in the training data and fails to generalize well to unseen data. The purpose of regularization is to add a penalty term to the model's loss function, discouraging complex or extreme parameter values. Some common regularization techniques include:\n1. L1 regularization (Lasso): Adds the absolute values of the model parameters to the loss function, promoting sparsity.\n2. L2 regularization (Ridge): Adds the squared values of the model parameters to the loss function, promoting smaller parameter values.\n3. Dropout: Randomly drops out (sets to zero) a fraction of the neurons during training, reducing co-adaptation and improving generalization."
+            },
+            {
+                "prompt": "Discuss the trade-offs between bias and variance in machine learning models. How can these trade-offs be managed?",
+                "response": "Bias and variance are two sources of error in machine learning models. Bias refers to the error introduced by approximating a real-world problem with a simplified model, while variance refers to the model's sensitivity to small fluctuations in the training data. Models with high bias tend to underfit, while models with high variance tend to overfit. The trade-off between bias and variance can be managed through techniques such as:\n1. Increasing model complexity: Reduces bias but may increase variance.\n2. Adding more training data: Reduces variance by exposing the model to more examples.\n3. Regularization: Balances bias and variance by controlling model complexity.\n4. Cross-validation: Helps estimate the model's performance on unseen data and guides hyperparameter tuning to find the right balance between bias and variance."
+            },
+            {
+                "prompt": "What are some popular techniques for handling imbalanced datasets in machine learning? Explain how these techniques work.",
+                "response": "Imbalanced datasets, where one class significantly outnumbers the other, can pose challenges for machine learning models. Some popular techniques for handling imbalanced datasets include:\n1. Oversampling: Increases the number of instances in the minority class by duplicating or synthetically generating new examples (e.g., SMOTE).\n2. Undersampling: Reduces the number of instances in the majority class by removing examples.\n3. Class weights: Assigns higher weights to the minority class during training, forcing the model to pay more attention to these examples.\n4. Ensemble techniques: Combine multiple models trained on different subsets of the data or with different class distributions.\n5. Anomaly detection: Treats the minority class as anomalies and uses anomaly detection techniques to identify them."
+            }
+        ]
 
-        # Use the tokenizer to encode sentences and pad them
-        self.input_ids = self.pad_sequence(self.tokenizer.encode(input_sentence, bos=True, eos=True))
-        self.labels = self.pad_sequence(self.tokenizer.encode(response_sentence, bos=True, eos=True))
-        self.mask = torch.ones(len(self.input_ids), dtype=torch.bool, device=self.device)
-
-        self.data = [{"input_ids": self.input_ids, "labels": self.labels, "mask": self.mask} for _ in range(num_samples)]
+        self.data = []
+        for prompt_response in prompts_and_responses:
+            input_ids = self.pad_sequence(self.tokenizer.encode(prompt_response["prompt"], bos=True, eos=True))
+            labels = self.pad_sequence(self.tokenizer.encode(prompt_response["response"], bos=True, eos=True))
+            mask = torch.ones(len(input_ids), dtype=torch.bool, device=self.device)
+            self.data.extend([{"input_ids": input_ids, "labels": labels, "mask": mask} for _ in range(num_samples // len(prompts_and_responses))])
 
     def pad_sequence(self, sequence):
         seq_len = min(len(sequence), self.max_len)
@@ -114,13 +163,11 @@ class PseudoDataset(Dataset):
         padded[:seq_len] = torch.tensor(sequence[:seq_len], dtype=self.dtype, device=self.device)
         return padded
 
-
     def __len__(self):
-        return self.num_samples
+        return len(self.data)
 
     def __getitem__(self, index):
         return self.data[index]
-
 
 
 class Trainer:
@@ -144,49 +191,58 @@ class Trainer:
             model_parallel_size=self.model_parallel_size,
         )
         return llama
-
     def train(self, dataloader, max_iters=10, warmup_iters=5, decay_lr=True, log_interval=10):
         self.model.train()
         torch.autograd.set_detect_anomaly(True)
         total_loss = 0
         optimizer = self.optimizer
         scheduler = self.get_lr_scheduler(optimizer, max_iters, warmup_iters, decay_lr)
+        scaler = torch.cuda.amp.GradScaler()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(device)
+    
         iter_num = 0
         while iter_num < max_iters:
             for batch_idx, batch in enumerate(dataloader):
-                input_ids = batch["input_ids"].to(self.device)
-                labels = batch["labels"].to(self.device)
+                if iter_num >= max_iters:
+                    break
+    
+                input_ids = batch["input_ids"].to(device)
+                labels = batch["labels"].to(device)
                 start_pos = 0
     
-                # Inside the training loop
+                optimizer.zero_grad(set_to_none=True)
+    
                 with torch.cuda.amp.autocast():
-                    outputs = self.model(input_ids, start_pos)
-                    
-                    self.monitor_activations(input_ids, outputs, iter_num)
-                    
+                    # Monitor intermediate activations
+                    for name, module in self.model.named_modules():
+                        module.register_forward_hook(lambda module, input, output: self.check_for_nan(output, name))
+    
+                    outputs = self.model(input_ids, start_pos=start_pos)
+    
                     loss = torch.nn.functional.cross_entropy(outputs.view(-1, self.model.vocab_size), labels.view(-1))
     
-                self.scaler.scale(loss).backward()
-    
-                self.scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-
-                self.monitor_gradients(iter_num)
-                
-                self.scaler.step(optimizer)
-                self.scaler.update()
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
                 scheduler.step()
-    
-                optimizer.zero_grad(set_to_none=True)
     
                 total_loss += loss.item()
                 iter_num += 1
     
-                if iter_num >= max_iters:
-                    break
+                if iter_num % log_interval == 0:
+                    print(f"Iteration {iter_num}: Loss = {loss.item()}")
     
-        return total_loss / iter_num
+        average_loss = total_loss / max_iters
+        print(f"Training completed with average loss: {average_loss}")
+        return average_loss
+    def check_for_nan(self, tensor, name):
+        if torch.isnan(tensor).any():
+            print("Min/Max:", tensor.min().item(), tensor.max().item())
+            print(f"NaN detected in {name}:")
 
+
+    
     def monitor_gradients(self, iter_num):
         with open(f"gradients_iter_{iter_num}.txt", "w") as f:
             f.write(f"Gradient Monitoring - Iteration {iter_num}:\n")

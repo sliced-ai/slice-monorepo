@@ -167,6 +167,7 @@ class Trainer:
     
                 with torch.cuda.amp.autocast():
                     outputs = self.model(input_ids, start_pos)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) 
                     loss = torch.nn.functional.cross_entropy(outputs.view(-1, self.model.vocab_size), labels.view(-1))
                     loss = loss / gradient_accumulation_steps
     
