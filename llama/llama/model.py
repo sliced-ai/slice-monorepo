@@ -1,10 +1,10 @@
-import torch
-import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset
-from fairscale.nn.model_parallel import initialize as fs_init
-from fairscale.nn.model_parallel import layers as fs_layers
-from torch import nn
+import math
+from dataclasses import dataclass
 from typing import Optional, Tuple
+
+import torch
+import torch.nn.functional as F
+from torch import nn
 
 @dataclass
 class ModelArgs:
@@ -16,6 +16,7 @@ class ModelArgs:
     multiple_of: int = 256  # make SwiGLU hidden layer size multiple of large power of 2
     ffn_dim_multiplier: Optional[float] = None
     norm_eps: float = 1e-5
+
     max_batch_size: int = 32
     max_seq_len: int = 2048
 
@@ -68,24 +69,15 @@ class Attention(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
         self.n_kv_heads = args.n_heads if args.n_kv_heads is None else args.n_kv_heads
-        model_parallel_size = fs_init.get_model_parallel_world_size()
-        self.n_local_heads = args.n_heads // model_parallel_size
-        self.n_local_kv_heads = self.n_kv_heads // model_parallel_size
+        self.n_local_heads = args.n_heads
+        self.n_local_kv_heads = self.n_kv_heads
         self.n_rep = self.n_local_heads // self.n_local_kv_heads
         self.head_dim = args.dim // args.n_heads
 
-        self.wq = fs_layers.ColumnParallelLinear(
-            args.dim, args.n_heads * self.head_dim, bias=False, gather_output=False, init_method=lambda x: x
-        )
-        self.wk = fs_layers.ColumnParallelLinear(
-            args.dim, self.n_kv_heads * self.head_dim, bias=False, gather_output=False, init_method=lambda x: x
-        )
-        self.wv = fs_layers.ColumnParallelLinear(
-            args.dim, self.n_kv_heads * self.head_dim, bias=False, gather_output=False, init_method=lambda x: x
-        )
-        self.wo = fs_layers.RowParallelLinear(
-            args.n_heads * self.head_dim, args.dim, bias=False, input_is_parallel=True, init_method=lambda x: x
-        )
+        self.wq = nn.Linear(args.dim, args.n_heads * self.head_dim, bias=False)
+        self.wk = nn.Linear(args.dim, self.n_kv_heads * self.head_dim, bias=False)
+        self.wv = nn.Linear(args.dim, self.n_kv_heads * self.head_dim, bias=False)
+        self.wo = nn.Linear(args.n_heads * self.head_dim, args.dim, bias=False)
 
         self.cache_k = torch.zeros(
             (args.max_batch_size, args.max_seq_len, self.n_local_kv_heads, self.head_dim)
@@ -135,15 +127,9 @@ class FeedForward(nn.Module):
             hidden_dim = int(ffn_dim_multiplier * hidden_dim)
         hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
 
-        self.w1 = fs_layers.ColumnParallelLinear(
-            dim, hidden_dim, bias=False, gather_output=False, init_method=lambda x: x
-        )
-        self.w2 = fs_layers.RowParallelLinear(
-            hidden_dim, dim, bias=False, input_is_parallel=True, init_method=lambda x: x
-        )
-        self.w3 = fs_layers.ColumnParallelLinear(
-            dim, hidden_dim, bias=False, gather_output=False, init_method=lambda x: x
-        )
+        self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+        self.w2 = nn.Linear(hidden_dim, dim, bias=False)
+        self.w3 = nn.Linear(dim, hidden_dim, bias=False)
 
     def forward(self, x):
         return self.w2(F.silu(self.w1(x)) * self.w3(x))
@@ -176,12 +162,12 @@ class Transformer(nn.Module):
         self.params = params
         self.vocab_size = params.vocab_size
         self.n_layers = params.n_layers
-        self.tok_embeddings = fs_layers.ParallelEmbedding(params.vocab_size, params.dim, init_method=lambda x: x)
+        self.tok_embeddings = nn.Embedding(params.vocab_size, params.dim)
         self.layers = nn.ModuleList()
         for layer_id in range(params.n_layers):
             self.layers.append(TransformerBlock(layer_id, params))
         self.norm = RMSNorm(params.dim, eps=params.norm_eps)
-        self.output = fs_layers.ColumnParallelLinear(params.dim, params.vocab_size, bias=False, init_method=lambda x: x)
+        self.output = nn.Linear(params.dim, params.vocab_size, bias=False)
         self.freqs_cis = precompute_freqs_cis(self.params.dim // self.params.n_heads, self.params.max_seq_len * 2)
 
     def forward(self, tokens: torch.Tensor, start_pos: int):
@@ -191,24 +177,10 @@ class Transformer(nn.Module):
         freqs_cis = self.freqs_cis[start_pos: start_pos + seqlen]
         mask = None
         if seqlen > 1:
-            mask = torch.full(
-                (1, 1, seqlen, seqlen), float("-inf"), device=tokens.device
-            )
+            mask = torch.full((1, 1, seqlen, seqlen), float("-inf"), device=tokens.device)
             mask = torch.triu(mask, diagonal=start_pos + 1).type_as(h)
         for layer in self.layers:
             h = layer(h, start_pos, freqs_cis, mask)
-            self.layer_inspection(layer, threshold=1e2)  # Add gradient inspection
         h = self.norm(h)
         output = self.output(h).float()
         return output
-
-    def layer_inspection(self, layer: nn.Module, threshold: float = 1e2):
-        for name, param in layer.named_parameters():
-            if param.grad is not None:
-                grad_norm = param.grad.norm().item()
-                if grad_norm > threshold:
-                    print(f"Exploding gradient detected in layer {layer.layer_id}, parameter: {name}")
-                    print(f"Gradient norm: {grad_norm:.2f}")
-
-# Initialize model parallelism
-fs_init.initialize_model_parallel(2)

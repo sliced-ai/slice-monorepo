@@ -1,462 +1,279 @@
-import math
-from dataclasses import dataclass  # Add this import statement
-from typing import Optional, Tuple
-
-import fairscale.nn.model_parallel.initialize as fs_init
 import torch
-import torch.nn.functional as F
-from fairscale.nn.model_parallel.layers import (
-    ColumnParallelLinear,
-    ParallelEmbedding,
-    RowParallelLinear,
-)
-from torch import nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset
+import os
+import sys
+import time
+from pathlib import Path
+import json
+import math
+from tokenizer import Tokenizer
+from fairscale.nn.data_parallel import FullyShardedDataParallel as FSDP
+from fairscale.nn.wrap import enable_wrap, auto_wrap, default_auto_wrap_policy
+
+print(f"\nCUDA AVAILABLE: {torch.cuda.is_available()}\n")
+
+def initialize_distributed():
+    if not torch.distributed.is_initialized():
+        torch.distributed.init_process_group(backend="nccl")
+
+# Initialize the distributed environment before importing the model
+initialize_distributed()
+
+from model import Transformer, ModelArgs  # Import the model after initializing distributed
+
+class llama_model:
+    def __init__(self, model, tokenizer):
+        self.model = model
+        self.tokenizer = tokenizer
+
+    @staticmethod
+    def build(
+        ckpt_dir: str,
+        tokenizer_path: str,
+        max_seq_len: int,
+        max_batch_size: int,
+    ) -> "llama_model":
+
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        torch.cuda.set_device(local_rank)
+
+        # seed must be the same in all processes
+        torch.manual_seed(1)
+
+        if local_rank > 0:
+            sys.stdout = open(os.devnull, "w")
+
+        start_time = time.time()
+
+        checkpoint_path = Path(ckpt_dir) / "consolidated.00.pth"  # Update checkpoint filename
+        assert checkpoint_path.exists(), f"Checkpoint file not found: {checkpoint_path}"
+
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+
+        with open(Path(ckpt_dir) / "params.json", "r") as f:
+            params = json.loads(f.read())
+
+        model_args: ModelArgs = ModelArgs(
+            max_seq_len=max_seq_len,
+            max_batch_size=max_batch_size,
+            **params,
+        )
+
+        tokenizer = Tokenizer(model_path=tokenizer_path)
+        model_args.vocab_size = tokenizer.n_words
+
+        model = Transformer(model_args)
+        model.load_state_dict(checkpoint, strict=False)
+
+        # Ensure all parameters, including LayerNorm, are in FP16
+        for name, module in model.named_modules():
+            if isinstance(module, torch.nn.LayerNorm):
+                module.half()
+        model = model.half()
+
+        # Debugging: Check parameter types before wrapping with FSDP
+        print("Parameter types before FSDP wrapping:")
+        for name, param in model.named_parameters():
+            print(f"{name}: {param.dtype}")
+
+        # Custom FSDP Class to handle mixed precision more flexibly
+        class MyFSDP(FSDP):
+            def __init__(self, *args, **kwargs):
+                kwargs.pop('mixed_precision', None)  # Remove mixed_precision policy
+                super().__init__(*args, **kwargs)
 
 
-@dataclass
-class ModelArgs:
-    dim: int = 4096
-    n_layers: int = 32
-    n_heads: int = 32
-    n_kv_heads: Optional[int] = None
-    vocab_size: int = -1  # defined later by tokenizer
-    multiple_of: int = 256  # make SwiGLU hidden layer size multiple of large power of 2
-    ffn_dim_multiplier: Optional[float] = None
-    norm_eps: float = 1e-5
+        with enable_wrap(wrapper_cls=MyFSDP, auto_wrap_policy=default_auto_wrap_policy):
+            model = auto_wrap(model)
 
-    max_batch_size: int = 32
-    max_seq_len: int = 2048
+        # Debugging: Check parameter types after wrapping with FSDP
+        print("Parameter types after FSDP wrapping:")
+        for name, param in model.named_parameters():
+            print(f"{name}: {param.dtype}")
 
+        print(f"Loaded in {time.time() - start_time:.2f} seconds")
 
-class RMSNorm(torch.nn.Module):
-    def __init__(self, dim: int, eps: float = 1e-6):
-        """
-        Initialize the RMSNorm normalization layer.
+        return llama_model(model, tokenizer)
 
-        Args:
-            dim (int): The dimension of the input tensor.
-            eps (float, optional): A small value added to the denominator for numerical stability. Default is 1e-6.
+    def test_model_generation(self, llama_model):
+        """Generates a short response to a simple prompt to test model loading."""
 
-        Attributes:
-            eps (float): A small value added to the denominator for numerical stability.
-            weight (nn.Parameter): Learnable scaling parameter.
+        dialogs = [[{"role": "user", "content": "Hello, how are you?"}]]
+        results = llama_model.chat_completion(
+            dialogs, max_gen_len=50, temperature=0.6, top_p=0.9
+        )
+        print("Model Generation Test:")
+        for dialog, result in zip(dialogs, results):
+            print(f"{dialog[0]['role'].capitalize()}: {dialog[0]['content']}")
+            print(
+                f"> {result['generation']['role'].capitalize()}: {result['generation']['content']}"
+            )
+        print("-----------------------------------")
 
-        """
-        super().__init__()
-        self.eps = eps
-        self.weight = nn.Parameter(torch.ones(dim))
+from typing import TypedDict, Literal
 
-    def _norm(self, x):
-        """
-        Apply the RMSNorm normalization to the input tensor.
+B_INST, E_INST = "[INST]", "[/INST]"
+B_SYS, E_SYS = "<<SYS>>\n", "\n<</SYS>>\n\n"
 
-        Args:
-            x (torch.Tensor): The input tensor.
+Role = Literal["system", "user", "assistant"]
 
-        Returns:
-            torch.Tensor: The normalized tensor.
+class Message(TypedDict):
+    role: Role
+    content: str
 
-        """
-        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+class PseudoDataset(Dataset):
+    def __init__(self, tokenizer, file_path="./prompts_responses.json", num_samples=100, dtype=torch.long, max_len=128):
+        self.tokenizer = tokenizer
+        self.dtype = dtype
+        self.max_len = max_len
+        self.num_samples = num_samples
 
-    def forward(self, x):
-        """
-        Forward pass through the RMSNorm layer.
+        with open(file_path, "r") as f:
+            prompts_and_responses = json.load(f)
 
-        Args:
-            x (torch.Tensor): The input tensor.
+        self.data = []
+        for _ in range(num_samples // len(prompts_and_responses)):
+            for prompt_response in prompts_and_responses:
+                dialog = [
+                    Message(role="user", content=f"{B_INST} {prompt_response['prompt'].strip()} {E_INST}"),
+                    Message(role="assistant", content=prompt_response["response"].strip())
+                ]
+                dialog_tokens = sum([self.tokenizer.encode(msg["content"], bos=True, eos=True) for msg in dialog], [])
+                dialog_tokens = dialog_tokens[:self.max_len]  # Truncate to max_len
 
-        Returns:
-            torch.Tensor: The output tensor after applying RMSNorm.
+                input_ids = torch.tensor(dialog_tokens, dtype=torch.half, device="cpu")
+                labels = input_ids.clone()
+                mask = torch.ones(len(input_ids), dtype=torch.bool, device="cpu")
+                self.data.append({"input_ids": input_ids, "labels": labels, "mask": mask})
 
-        """
-        output = self._norm(x.float()).type_as(x)
-        return output * self.weight
+    def __len__(self):
+        return len(self.data)
 
+    def __getitem__(self, index):
+        return self.data[index]
 
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
-    """
-    Precompute the frequency tensor for complex exponentials (cis) with given dimensions.
+class Trainer:
+    def __init__(self, ckpt_dir, tokenizer_path, max_seq_len=2048, max_batch_size=32):
+        self.device = torch.device("cuda")
+        self.max_seq_len = max_seq_len
+        self.max_batch_size = max_batch_size
+        self.llama_model = self.build_model(ckpt_dir, tokenizer_path, max_seq_len, max_batch_size)
+        self.model = self.llama_model.model
+        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-5, weight_decay=1e-1, betas=(0.9, 0.95))
+        self.scaler = torch.cuda.amp.GradScaler(enabled=True)  # Gradient scaler
 
-    This function calculates a frequency tensor with complex exponentials using the given dimension 'dim'
-    and the end index 'end'. The 'theta' parameter scales the frequencies.
-    The returned tensor contains complex values in complex64 data type.
+    def build_model(self, ckpt_dir, tokenizer_path, max_seq_len, max_batch_size):
+        llama = llama_model.build(
+            ckpt_dir=ckpt_dir,
+            tokenizer_path=tokenizer_path,
+            max_seq_len=max_seq_len,
+            max_batch_size=max_batch_size,
+        )
+        return llama
 
-    Args:
-        dim (int): Dimension of the frequency tensor.
-        end (int): End index for precomputing frequencies.
-        theta (float, optional): Scaling factor for frequency computation. Defaults to 10000.0.
+    def train(self, dataloader, max_iters=10, warmup_iters=5, decay_lr=True, log_interval=10, grad_accum_steps=4):
+        self.model.train()
+        torch.autograd.set_detect_anomaly(True)
+        total_loss = 0
+        optimizer = self.optimizer
+        scheduler = self.get_lr_scheduler(optimizer, max_iters, warmup_iters, decay_lr)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(device)
 
-    Returns:
-        torch.Tensor: Precomputed frequency tensor with complex exponentials.
+        iter_num = 0
+        while iter_num < max_iters:
+            for batch_idx, batch in enumerate(dataloader):
+                if iter_num >= max_iters:
+                    break
+                
+                input_ids = batch["input_ids"].to(device).long()
+                labels = batch["labels"].to(device).long()
+                start_pos = 0
+                
+                with torch.cuda.amp.autocast():
+                    outputs = self.model(input_ids, start_pos=start_pos)
+                    loss = torch.nn.functional.cross_entropy(outputs.view(-1, self.model.vocab_size), labels.view(-1)) / grad_accum_steps
+                
+                self.scaler.scale(loss).backward()
 
+                if (batch_idx + 1) % grad_accum_steps == 0:
+                    self.scaler.step(optimizer)
+                    self.scaler.update()
+                    optimizer.zero_grad(set_to_none=True)
+                    scheduler.step()
+                
+                total_loss += loss.item() * grad_accum_steps
+                iter_num += 1
+                
+                if iter_num % log_interval == 0:
+                    print(f"Iteration {iter_num}: Loss = {loss.item() * grad_accum_steps}")
+        
+        average_loss = total_loss / max_iters
+        print(f"Training completed with average loss: {average_loss}")
+        return average_loss
+
+    def get_lr_scheduler(self, optimizer, max_iters, warmup_iters, decay_lr):
+        def lr_lambda(iter_num):
+            if iter_num < warmup_iters:
+                return iter_num / warmup_iters
+            if iter_num > max_iters:
+                return 0.0
+            decay_ratio = (iter_num - warmup_iters) / (max_iters - warmup_iters)
+            coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+            return coeff
+
+        if decay_lr:
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+        else:
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _: 1.0)
+
+        return scheduler
+        
+    def evaluate(self, dataloader):
+        self.model.eval()
+        total_loss = 0
+        with torch.no_grad():
+            for batch in dataloader:
+                input_ids = batch["input_ids"].to(self.device)
+                labels = batch["labels"].to(self.device)
+                start_pos = 0
+                outputs = self.model(input_ids, start_pos)
+                loss = torch.nn.functional.cross_entropy(outputs.view(-1, self.model.vocab_size), labels.view(-1))
+                total_loss += loss.item()
+        return total_loss / len(dataloader)
+
+    def train_model(self, train_dataset, eval_dataset, num_epochs=10):
+        train_dataloader = DataLoader(train_dataset, batch_size=self.max_batch_size, shuffle=True)
+        eval_dataloader = DataLoader(eval_dataset, batch_size=self.max_batch_size)
     
-        
+        for epoch in range(num_epochs):
+            train_loss = self.train(train_dataloader)
+            eval_loss = self.evaluate(eval_dataloader)
+            print(f"Epoch {epoch + 1}/{num_epochs} - Train Loss: {train_loss:.4f} - Eval Loss: {eval_loss:.4f}")
 
-    """
-    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-    t = torch.arange(end, device=freqs.device)  # type: ignore
-    freqs = torch.outer(t, freqs).float()  # type: ignore
-    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
-    return freqs_cis
+    def save_model(self, save_path):
+        torch.save(self.model.state_dict(), save_path)
 
+# Set up paths
+ckpt_dir = "/workspace/slice-monorepo/llama-2-7b-chat"
+tokenizer_path = "/workspace/slice-monorepo/tokenizer.model"
 
-def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
-    """
-    Reshape frequency tensor for broadcasting it with another tensor.
+tokenizer = Tokenizer(tokenizer_path)
 
-    This function reshapes the frequency tensor to have the same shape as the target tensor 'x'
-    for the purpose of broadcasting the frequency tensor during element-wise operations.
+train_dataset = PseudoDataset(tokenizer=tokenizer)
+eval_dataset = PseudoDataset(tokenizer=tokenizer)
 
-    Args:
-        freqs_cis (torch.Tensor): Frequency tensor to be reshaped.
-        x (torch.Tensor): Target tensor for broadcasting compatibility.
+# Initialize trainer
+trainer = Trainer(ckpt_dir, tokenizer_path)
 
-    Returns:
-        torch.Tensor: Reshaped frequency tensor.
+# Train the model
+trainer.train_model(train_dataset, eval_dataset)
 
-    Raises:
-        AssertionError: If the frequency tensor doesn't match the expected shape.
-        AssertionError: If the target tensor 'x' doesn't have the expected number of dimensions.
-    """
-    ndim = x.ndim
-    assert 0 <= 1 < ndim
-    assert freqs_cis.shape == (x.shape[1], x.shape[-1])
-    shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
-    return freqs_cis.view(*shape)
+# Save the trained model
+# trainer.save_model("path/to/save/model.pt")
 
-
-def apply_rotary_emb(
-    xq: torch.Tensor,
-    xk: torch.Tensor,
-    freqs_cis: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Apply rotary embeddings to input tensors using the given frequency tensor.
-
-    This function applies rotary embeddings to the given query 'xq' and key 'xk' tensors using the provided
-    frequency tensor 'freqs_cis'. The input tensors are reshaped as complex numbers, and the frequency tensor
-    is reshaped for broadcasting compatibility. The resulting tensors contain rotary embeddings and are
-    returned as real tensors.
-
-    Args:
-        xq (torch.Tensor): Query tensor to apply rotary embeddings.
-        xk (torch.Tensor): Key tensor to apply rotary embeddings.
-        freqs_cis (torch.Tensor): Precomputed frequency tensor for complex exponentials.
-
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
-
-        
-
-    """
-    xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
-    xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
-    freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
-    xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
-    xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
-    return xq_out.type_as(xq), xk_out.type_as(xk)
-
-
-def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
-    """torch.repeat_interleave(x, dim=2, repeats=n_rep)"""
-    bs, slen, n_kv_heads, head_dim = x.shape
-    if n_rep == 1:
-        return x
-    return (
-        x[:, :, :, None, :]
-        .expand(bs, slen, n_kv_heads, n_rep, head_dim)
-        .reshape(bs, slen, n_kv_heads * n_rep, head_dim)
-    )
-
-
-class Attention(nn.Module):
-    """Multi-head attention module."""
-    def __init__(self, args: ModelArgs):
-        """
-        Initialize the Attention module.
-
-        Args:
-            args (ModelArgs): Model configuration parameters.
-
-        Attributes:
-            n_kv_heads (int): Number of key and value heads.
-            n_local_heads (int): Number of local query heads.
-            n_local_kv_heads (int): Number of local key and value heads.
-            n_rep (int): Number of repetitions for local heads.
-            head_dim (int): Dimension size of each attention head.
-            wq (ColumnParallelLinear): Linear transformation for queries.
-            wk (ColumnParallelLinear): Linear transformation for keys.
-            wv (ColumnParallelLinear): Linear transformation for values.
-            wo (RowParallelLinear): Linear transformation for output.
-            cache_k (torch.Tensor): Cached keys for attention.
-            cache_v (torch.Tensor): Cached values for attention.
-
-        """
-        super().__init__()
-        self.n_kv_heads = args.n_heads if args.n_kv_heads is None else args.n_kv_heads
-        model_parallel_size = fs_init.get_model_parallel_world_size()
-        self.n_local_heads = args.n_heads // model_parallel_size
-        self.n_local_kv_heads = self.n_kv_heads // model_parallel_size
-        self.n_rep = self.n_local_heads // self.n_local_kv_heads
-        self.head_dim = args.dim // args.n_heads
-
-        self.wq = ColumnParallelLinear(
-            args.dim,
-            args.n_heads * self.head_dim,
-            bias=False,
-            gather_output=False,
-            init_method=lambda x: x,
-        )
-        self.wk = ColumnParallelLinear(
-            args.dim,
-            self.n_kv_heads * self.head_dim,
-            bias=False,
-            gather_output=False,
-            init_method=lambda x: x,
-        )
-        self.wv = ColumnParallelLinear(
-            args.dim,
-            self.n_kv_heads * self.head_dim,
-            bias=False,
-            gather_output=False,
-            init_method=lambda x: x,
-        )
-        self.wo = RowParallelLinear(
-            args.n_heads * self.head_dim,
-            args.dim,
-            bias=False,
-            input_is_parallel=True,
-            init_method=lambda x: x,
-        )
-
-        self.cache_k = torch.zeros(
-            (
-                args.max_batch_size,
-                args.max_seq_len,
-                self.n_local_kv_heads,
-                self.head_dim,
-            )
-        ).cuda()
-        self.cache_v = torch.zeros(
-            (
-                args.max_batch_size,
-                args.max_seq_len,
-                self.n_local_kv_heads,
-                self.head_dim,
-            )
-        ).cuda()
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        start_pos: int,
-        freqs_cis: torch.Tensor,
-        mask: Optional[torch.Tensor],
-    ):
-        """
-        Forward pass of the attention module.
-
-        Args:
-            x (torch.Tensor): Input tensor.
-            start_pos (int): Starting position for caching.
-            freqs_cis (torch.Tensor): Precomputed frequency tensor.
-            mask (torch.Tensor, optional): Attention mask tensor.
-
-        Returns:
-            torch.Tensor: Output tensor after attention.
-
-        """
-        bsz, seqlen, _ = x.shape
-        xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-
-        xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-        xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
-        xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
-
-        xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
-
-        self.cache_k = self.cache_k.to(xq)
-        self.cache_v = self.cache_v.to(xq)
-
-        self.cache_k[:bsz, start_pos : start_pos + seqlen] = xk
-        self.cache_v[:bsz, start_pos : start_pos + seqlen] = xv
-
-        keys = self.cache_k[:bsz, : start_pos + seqlen]
-        values = self.cache_v[:bsz, : start_pos + seqlen]
-
-        # repeat k/v heads if n_kv_heads < n_heads
-        keys = repeat_kv(keys, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
-        values = repeat_kv(values, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
-
-        xq = xq.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
-        keys = keys.transpose(1, 2)
-        values = values.transpose(1, 2)
-        scores = torch.matmul(xq, keys.transpose(2, 3)) / math.sqrt(self.head_dim)
-        if mask is not None:
-            scores = scores + mask  # (bs, n_local_heads, seqlen, cache_len + seqlen)
-        scores = F.softmax(scores.float(), dim=-1).type_as(xq)
-        output = torch.matmul(scores, values)  # (bs, n_local_heads, seqlen, head_dim)
-        output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
-        return self.wo(output)
-
-
-class FeedForward(nn.Module):
-    def __init__(
-        self,
-        dim: int,
-        hidden_dim: int,
-        multiple_of: int,
-        ffn_dim_multiplier: Optional[float],
-    ):
-        """
-        Initialize the FeedForward module.
-
-        Args:
-            dim (int): Input dimension.
-            hidden_dim (int): Hidden dimension of the feedforward layer.
-            multiple_of (int): Value to ensure hidden dimension is a multiple of this value.
-            ffn_dim_multiplier (float, optional): Custom multiplier for hidden dimension. Defaults to None.
-
-        Attributes:
-            w1 (ColumnParallelLinear): Linear transformation for the first layer.
-            w2 (RowParallelLinear): Linear transformation for the second layer.
-            w3 (ColumnParallelLinear): Linear transformation for the third layer.
-
-        """
-        super().__init__()
-        hidden_dim = int(2 * hidden_dim / 3)
-        # custom dim factor multiplier
-        if ffn_dim_multiplier is not None:
-            hidden_dim = int(ffn_dim_multiplier * hidden_dim)
-        hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
-
-        self.w1 = ColumnParallelLinear(
-            dim, hidden_dim, bias=False, gather_output=False, init_method=lambda x: x
-        )
-        self.w2 = RowParallelLinear(
-            hidden_dim, dim, bias=False, input_is_parallel=True, init_method=lambda x: x
-        )
-        self.w3 = ColumnParallelLinear(
-            dim, hidden_dim, bias=False, gather_output=False, init_method=lambda x: x
-        )
-
-    def forward(self, x):
-        return self.w2(F.silu(self.w1(x)) * self.w3(x))
-
-
-class TransformerBlock(nn.Module):
-    def __init__(self, layer_id: int, args: ModelArgs):
-        """
-        Initialize a TransformerBlock.
-
-        Args:
-            layer_id (int): Identifier for the layer.
-            args (ModelArgs): Model configuration parameters.
-
-        Attributes:
-            n_heads (int): Number of attention heads.
-            dim (int): Dimension size of the model.
-            head_dim (int): Dimension size of each attention head.
-            attention (Attention): Attention module.
-            feed_forward (FeedForward): FeedForward module.
-            layer_id (int): Identifier for the layer.
-            attention_norm (RMSNorm): Layer normalization for attention output.
-            ffn_norm (RMSNorm): Layer normalization for feedforward output.
-
-        """
-        super().__init__()
-        self.n_heads = args.n_heads
-        self.dim = args.dim
-        self.head_dim = args.dim // args.n_heads
-        self.attention = Attention(args)
-        self.feed_forward = FeedForward(
-            dim=args.dim,
-            hidden_dim=4 * args.dim,
-            multiple_of=args.multiple_of,
-            ffn_dim_multiplier=args.ffn_dim_multiplier,
-        )
-        self.layer_id = layer_id
-        self.attention_norm = RMSNorm(args.dim, eps=args.norm_eps)
-        self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps)
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        start_pos: int,
-        freqs_cis: torch.Tensor,
-        mask: Optional[torch.Tensor],
-    ):
-        """
-        Perform a forward pass through the TransformerBlock.
-
-        Args:
-            x (torch.Tensor): Input tensor.
-            start_pos (int): Starting position for attention caching.
-            freqs_cis (torch.Tensor): Precomputed cosine and sine frequencies.
-            mask (torch.Tensor, optional): Masking tensor for attention. Defaults to None.
-
-        Returns:
-            torch.Tensor: Output tensor after applying attention and feedforward layers.
-
-        """
-        h = x + self.attention.forward(
-            self.attention_norm(x), start_pos, freqs_cis, mask
-        )
-        out = h + self.feed_forward.forward(self.ffn_norm(h))
-        return out
-
-class Transformer(nn.Module):
-    def __init__(self, params: ModelArgs):
-        super().__init__()
-        self.params = params
-        self.vocab_size = params.vocab_size
-        self.n_layers = params.n_layers
-        self.tok_embeddings = ParallelEmbedding(
-            params.vocab_size, params.dim, init_method=lambda x: x
-        )
-        self.layers = torch.nn.ModuleList()
-        for layer_id in range(params.n_layers):
-            self.layers.append(TransformerBlock(layer_id, params))
-        self.norm = RMSNorm(params.dim, eps=params.norm_eps)
-        self.output = ColumnParallelLinear(
-            params.dim, params.vocab_size, bias=False, init_method=lambda x: x
-        )
-        self.freqs_cis = precompute_freqs_cis(
-            self.params.dim // self.params.n_heads, self.params.max_seq_len * 2
-        )
-
-    def forward(self, tokens: torch.Tensor, start_pos: int):
-        _bsz, seqlen = tokens.shape
-        h = self.tok_embeddings(tokens)
-        self.freqs_cis = self.freqs_cis.to(h.device)
-        freqs_cis = self.freqs_cis[start_pos: start_pos + seqlen]
-        mask = None
-        if seqlen > 1:
-            mask = torch.full(
-                (1, 1, seqlen, seqlen), float("-inf"), device=tokens.device
-            )
-            mask = torch.triu(mask, diagonal=start_pos + 1).type_as(h)
-        for layer in self.layers:
-            h = layer(h, start_pos, freqs_cis, mask)
-            self.layer_inspection(layer, threshold=1e2)  # Add gradient inspection
-        h = self.norm(h)
-        output = self.output(h).float()
-        return output
-
-    def layer_inspection(self, layer: nn.Module, threshold: float = 1e2):
-        """
-        Inspect layer gradients to detect exploding gradients.
-        Args:
-            layer (nn.Module): The layer to inspect.
-            threshold (float): The gradient norm threshold for detecting exploding gradients.
-        """
-        for name, param in layer.named_parameters():
-            if param.grad is not None:
-                grad_norm = param.grad.norm().item()
-                if grad_norm > threshold:
-                    print(f"Exploding gradient detected in layer {layer.layer_id}, parameter: {name}")
-                    print(f"Gradient norm: {grad_norm:.2f}")
-
-# Initialize model parallelism
-fs_init.initialize_model_parallel(2)
+# Evaluate the model
+eval_dataloader = DataLoader(eval_dataset, batch_size=trainer.max_batch_size)
+eval_loss = trainer.evaluate(eval_dataloader)
+print(f"Evaluation Loss: {eval_loss:.4f}")

@@ -23,7 +23,7 @@ test train
 
 
 export RANK=0
-export WORLD_SIZE=1
+export WORLD_SIZE=2
 torchrun --nproc_per_node 1 train_evaluation.py
 
 
