@@ -1,337 +1,462 @@
-import torch
-import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset
-from model import Transformer, ModelArgs
-from tokenizer import Tokenizer
-import os
-import sys
-import time
-from pathlib import Path
-import json
-from typing import Optional
-from fairscale.nn.model_parallel.initialize import (
-    get_model_parallel_rank,
-    initialize_model_parallel,
-    model_parallel_is_initialized,
-)
-import torch.autograd
-from torch.utils.data import Dataset
-from torch import optim
 import math
-import matplotlib.pyplot as plt
+from dataclasses import dataclass  # Add this import statement
+from typing import Optional, Tuple
+
+import fairscale.nn.model_parallel.initialize as fs_init
+import torch
+import torch.nn.functional as F
+from fairscale.nn.model_parallel.layers import (
+    ColumnParallelLinear,
+    ParallelEmbedding,
+    RowParallelLinear,
+)
+from torch import nn
 
 
-import os
-os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+@dataclass
+class ModelArgs:
+    dim: int = 4096
+    n_layers: int = 32
+    n_heads: int = 32
+    n_kv_heads: Optional[int] = None
+    vocab_size: int = -1  # defined later by tokenizer
+    multiple_of: int = 256  # make SwiGLU hidden layer size multiple of large power of 2
+    ffn_dim_multiplier: Optional[float] = None
+    norm_eps: float = 1e-5
+
+    max_batch_size: int = 32
+    max_seq_len: int = 2048
 
 
-print(f"\nCUDA AVAILABLE: {torch.cuda.is_available()}\n")
+class RMSNorm(torch.nn.Module):
+    def __init__(self, dim: int, eps: float = 1e-6):
+        """
+        Initialize the RMSNorm normalization layer.
 
-class llama_model:
-    def __init__(self, model, tokenizer):
-        self.model = model
-        self.tokenizer = tokenizer
+        Args:
+            dim (int): The dimension of the input tensor.
+            eps (float, optional): A small value added to the denominator for numerical stability. Default is 1e-6.
 
-    @staticmethod
-    def build(
-        ckpt_dir: str,
-        tokenizer_path: str,
-        max_seq_len: int,
-        max_batch_size: int,
-        model_parallel_size: Optional[int] = None,
-    ) -> "llama_model":
+        Attributes:
+            eps (float): A small value added to the denominator for numerical stability.
+            weight (nn.Parameter): Learnable scaling parameter.
 
-        if not torch.distributed.is_initialized():
-            torch.distributed.init_process_group("nccl")
-        if not model_parallel_is_initialized():
-            if model_parallel_size is None:
-                model_parallel_size = int(os.environ.get("WORLD_SIZE", 1))
-            initialize_model_parallel(model_parallel_size)
+        """
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
 
-        local_rank = int(os.environ.get("LOCAL_RANK", 0))
-        torch.cuda.set_device(local_rank)
+    def _norm(self, x):
+        """
+        Apply the RMSNorm normalization to the input tensor.
 
-        # seed must be the same in all processes
-        torch.manual_seed(1)
+        Args:
+            x (torch.Tensor): The input tensor.
 
-        if local_rank > 0:
-            sys.stdout = open(os.devnull, "w")
+        Returns:
+            torch.Tensor: The normalized tensor.
 
-        start_time = time.time()
+        """
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
 
-        checkpoints = sorted(Path(ckpt_dir).glob("*.pth"))
-        assert len(checkpoints) > 0, f"no checkpoint files found in {ckpt_dir}"
-        assert model_parallel_size == len(
-            checkpoints
-        ), f"Loading a checkpoint for MP={len(checkpoints)} but world size is {model_parallel_size}"
+    def forward(self, x):
+        """
+        Forward pass through the RMSNorm layer.
 
-        ckpt_path = checkpoints[get_model_parallel_rank()]
-        checkpoint = torch.load(ckpt_path, map_location="cpu")
+        Args:
+            x (torch.Tensor): The input tensor.
 
-        with open(Path(ckpt_dir) / "params.json", "r") as f:
-            params = json.loads(f.read())
+        Returns:
+            torch.Tensor: The output tensor after applying RMSNorm.
 
-        model_args: ModelArgs = ModelArgs(
-            max_seq_len=max_seq_len,
-            max_batch_size=max_batch_size,
-            **params,
-        )
+        """
+        output = self._norm(x.float()).type_as(x)
+        return output * self.weight
 
-        tokenizer = Tokenizer(model_path=tokenizer_path)
-        model_args.vocab_size = tokenizer.n_words
 
-        torch.set_default_tensor_type(torch.cuda.HalfTensor)
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
+    """
+    Precompute the frequency tensor for complex exponentials (cis) with given dimensions.
 
-        model = Transformer(model_args)
-        model.load_state_dict(checkpoint, strict=False)
+    This function calculates a frequency tensor with complex exponentials using the given dimension 'dim'
+    and the end index 'end'. The 'theta' parameter scales the frequencies.
+    The returned tensor contains complex values in complex64 data type.
 
-        print(f"Loaded in {time.time() - start_time:.2f} seconds")
+    Args:
+        dim (int): Dimension of the frequency tensor.
+        end (int): End index for precomputing frequencies.
+        theta (float, optional): Scaling factor for frequency computation. Defaults to 10000.0.
 
-        self.test_model_generation(llama_model(model, tokenizer))
+    Returns:
+        torch.Tensor: Precomputed frequency tensor with complex exponentials.
 
-        return llama_model(model, tokenizer)
+    
         
-    def test_model_generation(self, llama_model):
-        """Generates a short response to a simple prompt to test model loading."""
 
-        dialogs = [[{"role": "user", "content": "Hello, how are you?"}]]
-        results = llama_model.chat_completion(
-            dialogs, max_gen_len=50, temperature=0.6, top_p=0.9
+    """
+    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
+    t = torch.arange(end, device=freqs.device)  # type: ignore
+    freqs = torch.outer(t, freqs).float()  # type: ignore
+    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
+    return freqs_cis
+
+
+def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
+    """
+    Reshape frequency tensor for broadcasting it with another tensor.
+
+    This function reshapes the frequency tensor to have the same shape as the target tensor 'x'
+    for the purpose of broadcasting the frequency tensor during element-wise operations.
+
+    Args:
+        freqs_cis (torch.Tensor): Frequency tensor to be reshaped.
+        x (torch.Tensor): Target tensor for broadcasting compatibility.
+
+    Returns:
+        torch.Tensor: Reshaped frequency tensor.
+
+    Raises:
+        AssertionError: If the frequency tensor doesn't match the expected shape.
+        AssertionError: If the target tensor 'x' doesn't have the expected number of dimensions.
+    """
+    ndim = x.ndim
+    assert 0 <= 1 < ndim
+    assert freqs_cis.shape == (x.shape[1], x.shape[-1])
+    shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
+    return freqs_cis.view(*shape)
+
+
+def apply_rotary_emb(
+    xq: torch.Tensor,
+    xk: torch.Tensor,
+    freqs_cis: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Apply rotary embeddings to input tensors using the given frequency tensor.
+
+    This function applies rotary embeddings to the given query 'xq' and key 'xk' tensors using the provided
+    frequency tensor 'freqs_cis'. The input tensors are reshaped as complex numbers, and the frequency tensor
+    is reshaped for broadcasting compatibility. The resulting tensors contain rotary embeddings and are
+    returned as real tensors.
+
+    Args:
+        xq (torch.Tensor): Query tensor to apply rotary embeddings.
+        xk (torch.Tensor): Key tensor to apply rotary embeddings.
+        freqs_cis (torch.Tensor): Precomputed frequency tensor for complex exponentials.
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
+
+        
+
+    """
+    xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
+    xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
+    freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
+    xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
+    xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
+    return xq_out.type_as(xq), xk_out.type_as(xk)
+
+
+def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """torch.repeat_interleave(x, dim=2, repeats=n_rep)"""
+    bs, slen, n_kv_heads, head_dim = x.shape
+    if n_rep == 1:
+        return x
+    return (
+        x[:, :, :, None, :]
+        .expand(bs, slen, n_kv_heads, n_rep, head_dim)
+        .reshape(bs, slen, n_kv_heads * n_rep, head_dim)
+    )
+
+
+class Attention(nn.Module):
+    """Multi-head attention module."""
+    def __init__(self, args: ModelArgs):
+        """
+        Initialize the Attention module.
+
+        Args:
+            args (ModelArgs): Model configuration parameters.
+
+        Attributes:
+            n_kv_heads (int): Number of key and value heads.
+            n_local_heads (int): Number of local query heads.
+            n_local_kv_heads (int): Number of local key and value heads.
+            n_rep (int): Number of repetitions for local heads.
+            head_dim (int): Dimension size of each attention head.
+            wq (ColumnParallelLinear): Linear transformation for queries.
+            wk (ColumnParallelLinear): Linear transformation for keys.
+            wv (ColumnParallelLinear): Linear transformation for values.
+            wo (RowParallelLinear): Linear transformation for output.
+            cache_k (torch.Tensor): Cached keys for attention.
+            cache_v (torch.Tensor): Cached values for attention.
+
+        """
+        super().__init__()
+        self.n_kv_heads = args.n_heads if args.n_kv_heads is None else args.n_kv_heads
+        model_parallel_size = fs_init.get_model_parallel_world_size()
+        self.n_local_heads = args.n_heads // model_parallel_size
+        self.n_local_kv_heads = self.n_kv_heads // model_parallel_size
+        self.n_rep = self.n_local_heads // self.n_local_kv_heads
+        self.head_dim = args.dim // args.n_heads
+
+        self.wq = ColumnParallelLinear(
+            args.dim,
+            args.n_heads * self.head_dim,
+            bias=False,
+            gather_output=False,
+            init_method=lambda x: x,
         )
-        print("Model Generation Test:")
-        for dialog, result in zip(dialogs, results):
-            print(f"{dialog[0]['role'].capitalize()}: {dialog[0]['content']}")
-            print(
-                f"> {result['generation']['role'].capitalize()}: {result['generation']['content']}"
+        self.wk = ColumnParallelLinear(
+            args.dim,
+            self.n_kv_heads * self.head_dim,
+            bias=False,
+            gather_output=False,
+            init_method=lambda x: x,
+        )
+        self.wv = ColumnParallelLinear(
+            args.dim,
+            self.n_kv_heads * self.head_dim,
+            bias=False,
+            gather_output=False,
+            init_method=lambda x: x,
+        )
+        self.wo = RowParallelLinear(
+            args.n_heads * self.head_dim,
+            args.dim,
+            bias=False,
+            input_is_parallel=True,
+            init_method=lambda x: x,
+        )
+
+        self.cache_k = torch.zeros(
+            (
+                args.max_batch_size,
+                args.max_seq_len,
+                self.n_local_kv_heads,
+                self.head_dim,
             )
-        print("-----------------------------------")
-class PseudoDataset(Dataset):
-    def __init__(self, tokenizer, device, num_samples=100, dtype=torch.long, max_len=128):
-        self.tokenizer = tokenizer
-        self.device = device
-        self.dtype = dtype
-        self.max_len = max_len  # Define a max length for padding
-        self.num_samples = num_samples
+        ).cuda()
+        self.cache_v = torch.zeros(
+            (
+                args.max_batch_size,
+                args.max_seq_len,
+                self.n_local_kv_heads,
+                self.head_dim,
+            )
+        ).cuda()
 
-        # Define the sentences and their responses
-        prompts_and_responses = [
-            {
-                "prompt": "I am trying to build an ML pipeline system using AWS. What steps should I follow in order to learn and then build it? For context, I have a background in CS but haven't built in AWS before.",
-                "response": "1. Familiarize yourself with AWS services like EC2, S3, and SageMaker.\n2. Learn about AWS best practices for ML pipelines.\n3. Design your pipeline architecture and choose appropriate AWS services.\n4. Implement and test your pipeline components.\n5. Integrate the components and deploy your pipeline on AWS.\n6. Monitor and optimize your pipeline's performance."
-            },
-            {
-                "prompt": "Can you explain the concept of transfer learning in machine learning? How does it differ from traditional machine learning approaches?",
-                "response": "Transfer learning is a technique in machine learning where knowledge gained from solving one problem is applied to a different but related problem. Unlike traditional machine learning, where models are trained from scratch on a specific task, transfer learning leverages pre-trained models that have already learned features from a large dataset. These pre-trained models can be fine-tuned on a smaller dataset for a specific task, reducing the need for large amounts of labeled data and accelerating the training process."
-            },
-            {
-                "prompt": "What are some common challenges faced when deploying machine learning models in production environments? How can these challenges be mitigated?",
-                "response": "Some common challenges in deploying ML models in production include:\n1. Data drift: Monitor and retrain models regularly to handle changes in data distribution.\n2. Scalability: Use scalable infrastructure and optimize models for inference.\n3. Monitoring and logging: Implement robust monitoring and logging mechanisms to detect and diagnose issues.\n4. Model versioning: Use version control and model registries to manage model versions and ensure reproducibility.\n5. Security and privacy: Apply security best practices and ensure compliance with data privacy regulations."
-            },
-            {
-                "prompt": "How does a convolutional neural network (CNN) differ from a regular neural network? What are the key architectural components of a CNN?",
-                "response": "A convolutional neural network (CNN) is a type of neural network designed specifically for processing grid-like data, such as images. Unlike regular neural networks, which use fully connected layers, CNNs employ convolutional layers that apply filters to extract local features from the input data. The key architectural components of a CNN include:\n1. Convolutional layers: Apply filters to learn spatial hierarchies of features.\n2. Pooling layers: Downsample the spatial dimensions of the feature maps to reduce computational complexity.\n3. Fully connected layers: Perform high-level reasoning and produce the final output.\n4. Activation functions: Introduce non-linearity to the network, enabling it to learn complex patterns."
-            },
-            {
-                "prompt": "Explain the concept of ensemble learning in machine learning. What are some popular ensemble techniques?",
-                "response": "Ensemble learning is a machine learning technique that combines multiple models to improve prediction accuracy and robustness. The idea is to create a strong learner by aggregating the predictions of multiple weak learners. Some popular ensemble techniques include:\n1. Bagging (Bootstrap Aggregating): Trains multiple models on different subsets of the training data and combines their predictions through averaging or voting.\n2. Boosting: Trains models sequentially, where each subsequent model focuses on the samples that were misclassified by the previous models.\n3. Stacking: Combines the predictions of multiple models using another model, called a meta-learner, to make the final prediction."
-            },
-            {
-                "prompt": "What is the purpose of regularization in machine learning? Describe some common regularization techniques.",
-                "response": "Regularization is a technique used in machine learning to prevent overfitting, which occurs when a model learns the noise in the training data and fails to generalize well to unseen data. The purpose of regularization is to add a penalty term to the model's loss function, discouraging complex or extreme parameter values. Some common regularization techniques include:\n1. L1 regularization (Lasso): Adds the absolute values of the model parameters to the loss function, promoting sparsity.\n2. L2 regularization (Ridge): Adds the squared values of the model parameters to the loss function, promoting smaller parameter values.\n3. Dropout: Randomly drops out (sets to zero) a fraction of the neurons during training, reducing co-adaptation and improving generalization."
-            },
-            {
-                "prompt": "Discuss the trade-offs between bias and variance in machine learning models. How can these trade-offs be managed?",
-                "response": "Bias and variance are two sources of error in machine learning models. Bias refers to the error introduced by approximating a real-world problem with a simplified model, while variance refers to the model's sensitivity to small fluctuations in the training data. Models with high bias tend to underfit, while models with high variance tend to overfit. The trade-off between bias and variance can be managed through techniques such as:\n1. Increasing model complexity: Reduces bias but may increase variance.\n2. Adding more training data: Reduces variance by exposing the model to more examples.\n3. Regularization: Balances bias and variance by controlling model complexity.\n4. Cross-validation: Helps estimate the model's performance on unseen data and guides hyperparameter tuning to find the right balance between bias and variance."
-            },
-            {
-                "prompt": "What are some popular techniques for handling imbalanced datasets in machine learning? Explain how these techniques work.",
-                "response": "Imbalanced datasets, where one class significantly outnumbers the other, can pose challenges for machine learning models. Some popular techniques for handling imbalanced datasets include:\n1. Oversampling: Increases the number of instances in the minority class by duplicating or synthetically generating new examples (e.g., SMOTE).\n2. Undersampling: Reduces the number of instances in the majority class by removing examples.\n3. Class weights: Assigns higher weights to the minority class during training, forcing the model to pay more attention to these examples.\n4. Ensemble techniques: Combine multiple models trained on different subsets of the data or with different class distributions.\n5. Anomaly detection: Treats the minority class as anomalies and uses anomaly detection techniques to identify them."
-            }
-        ]
+    def forward(
+        self,
+        x: torch.Tensor,
+        start_pos: int,
+        freqs_cis: torch.Tensor,
+        mask: Optional[torch.Tensor],
+    ):
+        """
+        Forward pass of the attention module.
 
-        self.data = []
-        for prompt_response in prompts_and_responses:
-            input_ids = self.pad_sequence(self.tokenizer.encode(prompt_response["prompt"], bos=True, eos=True))
-            labels = self.pad_sequence(self.tokenizer.encode(prompt_response["response"], bos=True, eos=True))
-            mask = torch.ones(len(input_ids), dtype=torch.bool, device=self.device)
-            self.data.extend([{"input_ids": input_ids, "labels": labels, "mask": mask} for _ in range(num_samples // len(prompts_and_responses))])
+        Args:
+            x (torch.Tensor): Input tensor.
+            start_pos (int): Starting position for caching.
+            freqs_cis (torch.Tensor): Precomputed frequency tensor.
+            mask (torch.Tensor, optional): Attention mask tensor.
 
-    def pad_sequence(self, sequence):
-        seq_len = min(len(sequence), self.max_len)
-        pad_id = self.tokenizer.pad_id  # Ensure this is correct
-        padded = torch.full((self.max_len,), pad_id, dtype=self.dtype, device=self.device)
-        padded[:seq_len] = torch.tensor(sequence[:seq_len], dtype=self.dtype, device=self.device)
-        return padded
+        Returns:
+            torch.Tensor: Output tensor after attention.
 
-    def __len__(self):
-        return len(self.data)
+        """
+        bsz, seqlen, _ = x.shape
+        xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
-    def __getitem__(self, index):
-        return self.data[index]
+        xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
+        xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
+        xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
+
+        xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+
+        self.cache_k = self.cache_k.to(xq)
+        self.cache_v = self.cache_v.to(xq)
+
+        self.cache_k[:bsz, start_pos : start_pos + seqlen] = xk
+        self.cache_v[:bsz, start_pos : start_pos + seqlen] = xv
+
+        keys = self.cache_k[:bsz, : start_pos + seqlen]
+        values = self.cache_v[:bsz, : start_pos + seqlen]
+
+        # repeat k/v heads if n_kv_heads < n_heads
+        keys = repeat_kv(keys, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
+        values = repeat_kv(values, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
+
+        xq = xq.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
+        keys = keys.transpose(1, 2)
+        values = values.transpose(1, 2)
+        scores = torch.matmul(xq, keys.transpose(2, 3)) / math.sqrt(self.head_dim)
+        if mask is not None:
+            scores = scores + mask  # (bs, n_local_heads, seqlen, cache_len + seqlen)
+        scores = F.softmax(scores.float(), dim=-1).type_as(xq)
+        output = torch.matmul(scores, values)  # (bs, n_local_heads, seqlen, head_dim)
+        output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
+        return self.wo(output)
 
 
-class Trainer:
-    def __init__(self, ckpt_dir, tokenizer_path, max_seq_len=2048, max_batch_size=8, model_parallel_size=None, dtype=torch.float32):
-        self.device = torch.device("cuda")
-        self.max_seq_len = max_seq_len
-        self.max_batch_size = max_batch_size
-        self.model_parallel_size = model_parallel_size or torch.cuda.device_count()
-        self.llama_model = self.build_model(ckpt_dir, tokenizer_path)
-        self.model = self.llama_model.model
-        self.dtype = dtype
-        self.optimizer = optim.AdamW(self.model.parameters(), lr=1e-5, weight_decay=1e-1, betas=(0.9, 0.95))
-        self.scaler = torch.cuda.amp.GradScaler(enabled=(dtype == dtype))  # Gradient scaler
+class FeedForward(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        hidden_dim: int,
+        multiple_of: int,
+        ffn_dim_multiplier: Optional[float],
+    ):
+        """
+        Initialize the FeedForward module.
 
-    def build_model(self, ckpt_dir, tokenizer_path):
-        llama = llama_model.build(
-            ckpt_dir=ckpt_dir,
-            tokenizer_path=tokenizer_path,
-            max_seq_len=self.max_seq_len,
-            max_batch_size=self.max_batch_size,
-            model_parallel_size=self.model_parallel_size,
+        Args:
+            dim (int): Input dimension.
+            hidden_dim (int): Hidden dimension of the feedforward layer.
+            multiple_of (int): Value to ensure hidden dimension is a multiple of this value.
+            ffn_dim_multiplier (float, optional): Custom multiplier for hidden dimension. Defaults to None.
+
+        Attributes:
+            w1 (ColumnParallelLinear): Linear transformation for the first layer.
+            w2 (RowParallelLinear): Linear transformation for the second layer.
+            w3 (ColumnParallelLinear): Linear transformation for the third layer.
+
+        """
+        super().__init__()
+        hidden_dim = int(2 * hidden_dim / 3)
+        # custom dim factor multiplier
+        if ffn_dim_multiplier is not None:
+            hidden_dim = int(ffn_dim_multiplier * hidden_dim)
+        hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
+
+        self.w1 = ColumnParallelLinear(
+            dim, hidden_dim, bias=False, gather_output=False, init_method=lambda x: x
         )
-        return llama
-    def train(self, dataloader, max_iters=10, warmup_iters=5, decay_lr=True, log_interval=10):
-        self.model.train()
-        torch.autograd.set_detect_anomaly(True)
-        total_loss = 0
-        optimizer = self.optimizer
-        scheduler = self.get_lr_scheduler(optimizer, max_iters, warmup_iters, decay_lr)
-        scaler = torch.cuda.amp.GradScaler()
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model.to(device)
-    
-        iter_num = 0
-        while iter_num < max_iters:
-            for batch_idx, batch in enumerate(dataloader):
-                if iter_num >= max_iters:
-                    break
-    
-                input_ids = batch["input_ids"].to(device)
-                labels = batch["labels"].to(device)
-                start_pos = 0
-    
-                optimizer.zero_grad(set_to_none=True)
-    
-                with torch.cuda.amp.autocast():
-                    # Monitor intermediate activations
-                    for name, module in self.model.named_modules():
-                        module.register_forward_hook(lambda module, input, output: self.check_for_nan(output, name))
-    
-                    outputs = self.model(input_ids, start_pos=start_pos)
-    
-                    loss = torch.nn.functional.cross_entropy(outputs.view(-1, self.model.vocab_size), labels.view(-1))
-    
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-                scheduler.step()
-    
-                total_loss += loss.item()
-                iter_num += 1
-    
-                if iter_num % log_interval == 0:
-                    print(f"Iteration {iter_num}: Loss = {loss.item()}")
-    
-        average_loss = total_loss / max_iters
-        print(f"Training completed with average loss: {average_loss}")
-        return average_loss
-    def check_for_nan(self, tensor, name):
-        if torch.isnan(tensor).any():
-            print("Min/Max:", tensor.min().item(), tensor.max().item())
-            print(f"NaN detected in {name}:")
+        self.w2 = RowParallelLinear(
+            hidden_dim, dim, bias=False, input_is_parallel=True, init_method=lambda x: x
+        )
+        self.w3 = ColumnParallelLinear(
+            dim, hidden_dim, bias=False, gather_output=False, init_method=lambda x: x
+        )
+
+    def forward(self, x):
+        return self.w2(F.silu(self.w1(x)) * self.w3(x))
 
 
-    
-    def monitor_gradients(self, iter_num):
-        with open(f"gradients_iter_{iter_num}.txt", "w") as f:
-            f.write(f"Gradient Monitoring - Iteration {iter_num}:\n")
-            for name, param in self.model.named_parameters():
-                if param.grad is not None:
-                    grad = param.grad.detach()
-                    f.write(f"Parameter: {name}\n")
-                    f.write(f"    Gradient Mean: {grad.mean().item()}\n")
-                    f.write(f"    Gradient Std: {grad.std().item()}\n")
-                    f.write(f"    Gradient Min: {grad.min().item()}\n")
-                    f.write(f"    Gradient Max: {grad.max().item()}\n")
-                    f.write(f"    Gradient Norm: {grad.norm().item()}\n")
-                    f.write(f"    Gradient Sparsity: {1.0 - (grad != 0).float().mean().item()}\n")
-                    f.write("---\n")
-    
-    def monitor_activations(self, inputs, outputs, iter_num):
-        with open(f"activations_iter_{iter_num}.txt", "w") as f:
-            f.write(f"Activation Monitoring - Iteration {iter_num}:\n")
-            f.write(f"Input: {inputs.cpu().numpy().flatten()}\n")
-            f.write(f"Output: {outputs.detach().cpu().numpy().flatten()}\n")
-    
-    def get_lr_scheduler(self, optimizer, max_iters, warmup_iters, decay_lr):
-        def lr_lambda(iter_num):
-            if iter_num < warmup_iters:
-                return iter_num / warmup_iters
-            if iter_num > max_iters:
-                return 0.0
-            decay_ratio = (iter_num - warmup_iters) / (max_iters - warmup_iters)
-            coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
-            return coeff
+class TransformerBlock(nn.Module):
+    def __init__(self, layer_id: int, args: ModelArgs):
+        """
+        Initialize a TransformerBlock.
 
-        if decay_lr:
-            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-        else:
-            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _: 1.0)
+        Args:
+            layer_id (int): Identifier for the layer.
+            args (ModelArgs): Model configuration parameters.
 
-        return scheduler
-        
-    def evaluate(self, dataloader):
-        self.model.eval()
-        total_loss = 0
-        with torch.no_grad():
-            for batch in dataloader:
-                input_ids = batch["input_ids"].to(self.device)
-                labels = batch["labels"].to(self.device)
-                start_pos = 0
-                outputs = self.model(input_ids, start_pos)
-                loss = torch.nn.functional.cross_entropy(outputs.view(-1, self.model.vocab_size), labels.view(-1))
-                total_loss += loss.item()
-        return total_loss / len(dataloader)
+        Attributes:
+            n_heads (int): Number of attention heads.
+            dim (int): Dimension size of the model.
+            head_dim (int): Dimension size of each attention head.
+            attention (Attention): Attention module.
+            feed_forward (FeedForward): FeedForward module.
+            layer_id (int): Identifier for the layer.
+            attention_norm (RMSNorm): Layer normalization for attention output.
+            ffn_norm (RMSNorm): Layer normalization for feedforward output.
 
-    def train_model(self, train_dataset, eval_dataset, num_epochs=10):
-        generator = torch.Generator(device='cuda')
-        train_dataloader = DataLoader(train_dataset, batch_size=self.max_batch_size, shuffle=True, generator=generator)
-        eval_dataloader = DataLoader(eval_dataset, batch_size=self.max_batch_size)
-    
-        for epoch in range(num_epochs):
-            train_loss = self.train(train_dataloader)
-            eval_loss = self.evaluate(eval_dataloader)
-            print(f"Epoch {epoch + 1}/{num_epochs} - Train Loss: {train_loss:.4f} - Eval Loss: {eval_loss:.4f}")
+        """
+        super().__init__()
+        self.n_heads = args.n_heads
+        self.dim = args.dim
+        self.head_dim = args.dim // args.n_heads
+        self.attention = Attention(args)
+        self.feed_forward = FeedForward(
+            dim=args.dim,
+            hidden_dim=4 * args.dim,
+            multiple_of=args.multiple_of,
+            ffn_dim_multiplier=args.ffn_dim_multiplier,
+        )
+        self.layer_id = layer_id
+        self.attention_norm = RMSNorm(args.dim, eps=args.norm_eps)
+        self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps)
 
-    def save_model(self, save_path):
-        torch.save(self.model.state_dict(), save_path)
+    def forward(
+        self,
+        x: torch.Tensor,
+        start_pos: int,
+        freqs_cis: torch.Tensor,
+        mask: Optional[torch.Tensor],
+    ):
+        """
+        Perform a forward pass through the TransformerBlock.
 
-# Set up paths
-ckpt_dir = "/workspace/slice-monorepo/llama-2-7b-chat"
-tokenizer_path = "/workspace/slice-monorepo/tokenizer.model"
+        Args:
+            x (torch.Tensor): Input tensor.
+            start_pos (int): Starting position for attention caching.
+            freqs_cis (torch.Tensor): Precomputed cosine and sine frequencies.
+            mask (torch.Tensor, optional): Masking tensor for attention. Defaults to None.
 
-tokenizer = Tokenizer(tokenizer_path)
+        Returns:
+            torch.Tensor: Output tensor after applying attention and feedforward layers.
 
-train_dataset = PseudoDataset(tokenizer=tokenizer, device='cpu')
-eval_dataset = PseudoDataset(tokenizer=tokenizer, device='cpu')
+        """
+        h = x + self.attention.forward(
+            self.attention_norm(x), start_pos, freqs_cis, mask
+        )
+        out = h + self.feed_forward.forward(self.ffn_norm(h))
+        return out
 
-for i in range(2):
-    data_point = train_dataset[i]
-    #print(f"Data Point {i+1}: {data_point}")
-    break
-    
-# Initialize trainer
-trainer = Trainer(ckpt_dir, tokenizer_path)
+class Transformer(nn.Module):
+    def __init__(self, params: ModelArgs):
+        super().__init__()
+        self.params = params
+        self.vocab_size = params.vocab_size
+        self.n_layers = params.n_layers
+        self.tok_embeddings = ParallelEmbedding(
+            params.vocab_size, params.dim, init_method=lambda x: x
+        )
+        self.layers = torch.nn.ModuleList()
+        for layer_id in range(params.n_layers):
+            self.layers.append(TransformerBlock(layer_id, params))
+        self.norm = RMSNorm(params.dim, eps=params.norm_eps)
+        self.output = ColumnParallelLinear(
+            params.dim, params.vocab_size, bias=False, init_method=lambda x: x
+        )
+        self.freqs_cis = precompute_freqs_cis(
+            self.params.dim // self.params.n_heads, self.params.max_seq_len * 2
+        )
 
-# Train the model
-trainer.train_model(train_dataset, eval_dataset)
+    def forward(self, tokens: torch.Tensor, start_pos: int):
+        _bsz, seqlen = tokens.shape
+        h = self.tok_embeddings(tokens)
+        self.freqs_cis = self.freqs_cis.to(h.device)
+        freqs_cis = self.freqs_cis[start_pos: start_pos + seqlen]
+        mask = None
+        if seqlen > 1:
+            mask = torch.full(
+                (1, 1, seqlen, seqlen), float("-inf"), device=tokens.device
+            )
+            mask = torch.triu(mask, diagonal=start_pos + 1).type_as(h)
+        for layer in self.layers:
+            h = layer(h, start_pos, freqs_cis, mask)
+            self.layer_inspection(layer, threshold=1e2)  # Add gradient inspection
+        h = self.norm(h)
+        output = self.output(h).float()
+        return output
 
-# Save the trained model
-#trainer.save_model("path/to/save/model.pt")
+    def layer_inspection(self, layer: nn.Module, threshold: float = 1e2):
+        """
+        Inspect layer gradients to detect exploding gradients.
+        Args:
+            layer (nn.Module): The layer to inspect.
+            threshold (float): The gradient norm threshold for detecting exploding gradients.
+        """
+        for name, param in layer.named_parameters():
+            if param.grad is not None:
+                grad_norm = param.grad.norm().item()
+                if grad_norm > threshold:
+                    print(f"Exploding gradient detected in layer {layer.layer_id}, parameter: {name}")
+                    print(f"Gradient norm: {grad_norm:.2f}")
 
-# Evaluate the model
-eval_dataloader = DataLoader(eval_dataset, batch_size=trainer.max_batch_size)
-eval_loss = trainer.evaluate(eval_dataloader)
-print(f"Evaluation Loss: {eval_loss:.4f}")
-        
+# Initialize model parallelism
+fs_init.initialize_model_parallel(2)
