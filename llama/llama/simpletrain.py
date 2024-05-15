@@ -17,11 +17,9 @@ def initialize_distributed():
     if not torch.distributed.is_initialized():
         torch.distributed.init_process_group(backend="nccl")
 
-# Initialize the distributed environment before importing the model
 initialize_distributed()
 
 from model import Transformer, ModelArgs  # Import the model after initializing distributed
-
 class llama_model:
     def __init__(self, model, tokenizer):
         self.model = model
@@ -46,7 +44,7 @@ class llama_model:
 
         start_time = time.time()
 
-        checkpoint_path = Path(ckpt_dir) / "consolidated.00.pth"  # Update checkpoint filename
+        checkpoint_path = Path(ckpt_dir) / "consolidated.00.pth"
         assert checkpoint_path.exists(), f"Checkpoint file not found: {checkpoint_path}"
 
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
@@ -66,50 +64,21 @@ class llama_model:
         model = Transformer(model_args)
         model.load_state_dict(checkpoint, strict=False)
 
-        # Ensure all parameters, including LayerNorm, are in FP16
-        for name, module in model.named_modules():
-            if isinstance(module, torch.nn.LayerNorm):
-                module.half()
-        model = model.half()
+        # Ensure all parameters are in float16 before FSDP wrapping
+        model = model.half()  
+        for param in model.parameters():
+            param.data = param.data.half()
 
-        # Debugging: Check parameter types before wrapping with FSDP
-        print("Parameter types before FSDP wrapping:")
-        for name, param in model.named_parameters():
-            print(f"{name}: {param.dtype}")
-
-        # Custom FSDP Class to handle mixed precision more flexibly
-        class MyFSDP(FSDP):
-            def __init__(self, *args, **kwargs):
-                kwargs.pop('mixed_precision', None)  # Remove mixed_precision policy
-                super().__init__(*args, **kwargs)
-
-
-        with enable_wrap(wrapper_cls=MyFSDP, auto_wrap_policy=default_auto_wrap_policy):
-            model = auto_wrap(model)
-
-        # Debugging: Check parameter types after wrapping with FSDP
-        print("Parameter types after FSDP wrapping:")
-        for name, param in model.named_parameters():
-            print(f"{name}: {param.dtype}")
+        # Manually wrap the model with FSDP and mixed precision config
+        model = FSDP(model, mixed_precision=torch.distributed.fsdp.MixedPrecision(
+            param_dtype=torch.float16, 
+            reduce_dtype=torch.float32, 
+            buffer_dtype=torch.float16
+        ))
 
         print(f"Loaded in {time.time() - start_time:.2f} seconds")
 
         return llama_model(model, tokenizer)
-
-    def test_model_generation(self, llama_model):
-        """Generates a short response to a simple prompt to test model loading."""
-
-        dialogs = [[{"role": "user", "content": "Hello, how are you?"}]]
-        results = llama_model.chat_completion(
-            dialogs, max_gen_len=50, temperature=0.6, top_p=0.9
-        )
-        print("Model Generation Test:")
-        for dialog, result in zip(dialogs, results):
-            print(f"{dialog[0]['role'].capitalize()}: {dialog[0]['content']}")
-            print(
-                f"> {result['generation']['role'].capitalize()}: {result['generation']['content']}"
-            )
-        print("-----------------------------------")
 
 from typing import TypedDict, Literal
 
