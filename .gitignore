@@ -13,7 +13,6 @@ model_training/Fine_Tune/.DS_Store
 *.tsv
 infastructure/.DS_Store
 .ipynb_checkpoints/
-*.ipynb
 *.log
 *.chk
 llama-2-7b-chat/
