@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Pipeline Experiment</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Chat Pipeline Experiment</h1>
+        <form id="experiment-form">
+            <label for="experiment_name">Experiment Name:</label>
+            <input type="text" id="experiment_name" name="experiment_name" required>
+
+            <label for="input_text">Input Text:</label>
+            <input type="text" id="input_text" name="input_text" required>
+
+            <label>
+                <input type="checkbox" id="use_default" name="use_default">
+                Use Default Settings
+            </label>
+
+            <div id="custom-settings">
+                <h3>Model Configuration</h3>
+                <label for="model_name">Model Name:</label>
+                <input type="text" id="model_name" name="model_name">
+
+                <label for="num_inferences">Number of Inferences:</label>
+                <input type="number" id="num_inferences" name="num_inferences">
+
+                <label for="hyper_params">Hyper Params (key1=value1,key2=value2):</label>
+                <input type="text" id="hyper_params" name="hyper_params">
+
+                <h3>Embedding Model Configuration</h3>
+                <label for="embed_model_name">Embedding Model Name:</label>
+                <input type="text" id="embed_model_name" name="embed_model_name">
+
+                <label for="embed_settings">Embedding Settings (key1=value1,key2=value2):</label>
+                <input type="text" id="embed_settings" name="embed_settings">
+
+                <h3>Autoencoder Configuration</h3>
+                <label for="encoder_type">Encoder Type:</label>
+                <input type="text" id="encoder_type" name="encoder_type">
+
+                <label for="encoder_settings">Encoder Settings (key1=value1,key2=value2):</label>
+                <input type="text" id="encoder_settings" name="encoder_settings">
+            </div>
+
+            <button type="submit">Start Experiment</button>
+        </form>
+
+        <div id="response"></div>
+    </div>
+
+    <script>
+        document.getElementById('use_default').addEventListener('change', function() {
+            document.getElementById('custom-settings').style.display = this.checked ? 'none' : 'block';
+        });
+
+        document.getElementById('experiment-form').addEventListener('submit', function(event) {
+            event.preventDefault();
+            const formData = new FormData(this);
+            fetch('/start_experiment', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('response').innerText = data.message;
+            })
+            .catch(error => console.error('Error:', error));
+        });
+    </script>
+</body>
+</html>
