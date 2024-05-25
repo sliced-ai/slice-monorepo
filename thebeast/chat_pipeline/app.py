@@ -9,8 +9,6 @@ from auto_encoder import AutoEncoderTrainer
 
 app = Flask(__name__)
 
-
-
 class ChatPipeline:
     def __init__(self, experiment_name):
         self.experiment_name = experiment_name
