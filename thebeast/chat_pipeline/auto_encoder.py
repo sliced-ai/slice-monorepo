@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 import numpy as np
 from scipy.ndimage import gaussian_filter
-import matplotlib as mpl
+import os
 
 class AutoEncoder(nn.Module):
     def __init__(self, input_size, hidden_size):
@@ -58,45 +58,47 @@ class AutoEncoderTrainer:
         combined_embedding = encoded.mean(dim=0)
         return combined_embedding.detach().cpu().numpy(), encoded.detach().cpu().numpy(), self.model.state_dict()
 
-    def visualize_embeddings_tsne(self, embeddings, save_path='embedding_visualization_tsne.png'):
+    def visualize_embeddings_tsne(self, embeddings, title='2D Visualization of Embeddings'):
         n_samples = len(embeddings)
-        perplexity = min(40, n_samples - 1)  # Adjust perplexity dynamically
+        perplexity = min(40, n_samples - 1)  # Set perplexity to a value less than n_samples
 
-        tsne = TSNE(n_components=2, verbose=1, perplexity=perplexity, n_iter=300)
+        tsne = TSNE(n_components=2, verbose=1, perplexity=perplexity, max_iter=300)
         tsne_results = tsne.fit_transform(embeddings)
-
         plt.figure(figsize=(10, 6))
-        mpl.style.use('seaborn-darkgrid')  # Using seaborn-dark style for a better visual appeal
-        plt.scatter(tsne_results[:, 0], tsne_results[:, 1], alpha=0.5, edgecolor='k')
-        plt.axis('off')  # Hide axes
-        plt.grid(False)  # Turn off the grid
-        plt.savefig(save_path, bbox_inches='tight', pad_inches=0)  # Save without padding and tight bounding box
-        plt.close()
+        plt.scatter(tsne_results[:, 0], tsne_results[:, 1], alpha=0.5)
+        plt.title(title)
+        plt.xlabel('Component 1')
+        plt.ylabel('Component 2')
+        plt.grid(True)
+        plt.savefig('embedding_visualization_tsne.png')
+        plt.show()
 
-    def visualize_2d_grid(self, embeddings, grid_size=50, save_path='embedding_visualization_3d.png'):
+    def visualize_2d_grid(self, embeddings, grid_size=50, title='3D Visualization of Smoothed Text Embeddings'):
         embedding_size = embeddings.shape[1]
         adjusted_grid_size = int(np.sqrt(embedding_size))
-
+        
         if adjusted_grid_size ** 2 != embedding_size:
             embeddings = [np.pad(embed, (0, adjusted_grid_size ** 2 - embed.size), 'constant') for embed in embeddings]
-
+        
         smoothed_grids = np.array([gaussian_filter(embedding.reshape(adjusted_grid_size, adjusted_grid_size), sigma=2) for embedding in embeddings])
 
         fig = plt.figure(figsize=(12, 8))
         ax = fig.add_subplot(111, projection='3d')
-        mpl.style.use('seaborn-v0_8-darkgrid')  # Consistent style
-
+        
         X, Y = np.meshgrid(range(adjusted_grid_size), range(adjusted_grid_size))
         
-        for i, grid in enumerate(smoothed_grids):
-            Z = grid + i * 0.1  # Slightly offsetting each grid for better visibility
-            ax.plot_surface(X, Y, Z, cmap='viridis', edgecolor='none', alpha=0.7)
+        offset = 0.0
+        for i in range(smoothed_grids.shape[0]):
+            Z = smoothed_grids[i] + i * offset  # Offset each grid
+            ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.7)
 
-        plt.axis('off')  # Hide axes
-        plt.grid(False)  # Turn off the grid
-        plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
-        plt.close()
+        ax.set_title(title)
+        ax.set_xlabel('Dimension 1')
+        ax.set_ylabel('Dimension 2')
+        ax.set_zlabel('Embedding Value')
 
+        plt.savefig('embedding_visualization_3d.png')
+        plt.show()
 
 def main():
     encoder_config = {
