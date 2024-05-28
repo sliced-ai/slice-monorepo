@@ -8,49 +8,67 @@
 </head>
 <body>
     <div class="container">
-        <h1>Chat Pipeline Experiment</h1>
-        <form id="experiment-form">
-            <label for="experiment_name">Experiment Name:</label>
-            <input type="text" id="experiment_name" name="experiment_name" required>
+        <div class="left-side">
+            <h2>Response Viewer</h2>
+            <div id="text-response" class="placeholder">Text response will appear here...</div>
 
-            <label for="input_text">Input Text:</label>
-            <input type="text" id="input_text" name="input_text" required>
+            <h2>Image Viewer</h2>
+            <div id="image-response" class="placeholder">Image response will appear here...</div>
+        </div>
+        <div class="right-side">
+            <h1>Chat Pipeline Experiment</h1>
+            <form id="experiment-form">
+                <label for="experiment_name">Experiment Name:</label>
+                <input type="text" id="experiment_name" name="experiment_name" required>
 
-            <label>
-                <input type="checkbox" id="use_default" name="use_default">
-                Use Default Settings
-            </label>
+                <label for="input_text">Input Text:</label>
+                <input type="text" id="input_text" name="input_text" required>
 
-            <div id="custom-settings">
-                <h3>Model Configuration</h3>
-                <label for="model_name">Model Name:</label>
-                <input type="text" id="model_name" name="model_name">
+                <label>
+                    <input type="checkbox" id="use_default" name="use_default">
+                    Use Default Settings
+                </label>
 
-                <label for="num_inferences">Number of Inferences:</label>
-                <input type="number" id="num_inferences" name="num_inferences">
+                <div id="custom-settings">
+                    <h3>Model Configuration</h3>
+                    <label for="model_name">Model Name:</label>
+                    <input type="text" id="model_name" name="model_name" value="gpt-4o">
 
-                <label for="hyper_params">Hyper Params (key1=value1,key2=value2):</label>
-                <input type="text" id="hyper_params" name="hyper_params">
+                    <label for="num_inferences">Number of Inferences:</label>
+                    <input type="number" id="num_inferences" name="num_inferences" value="2">
 
-                <h3>Embedding Model Configuration</h3>
-                <label for="embed_model_name">Embedding Model Name:</label>
-                <input type="text" id="embed_model_name" name="embed_model_name">
+                    <label for="max_tokens">Max Tokens:</label>
+                    <input type="number" id="max_tokens" name="max_tokens" value="150">
 
-                <label for="embed_settings">Embedding Settings (key1=value1,key2=value2):</label>
-                <input type="text" id="embed_settings" name="embed_settings">
+                    <label for="temperature">Temperature:</label>
+                    <input type="number" step="0.1" id="temperature" name="temperature" value="0.7">
 
-                <h3>Autoencoder Configuration</h3>
-                <label for="encoder_type">Encoder Type:</label>
-                <input type="text" id="encoder_type" name="encoder_type">
+                    <label for="top_p">Top P:</label>
+                    <input type="number" step="0.1" id="top_p" name="top_p" value="0.9">
 
-                <label for="encoder_settings">Encoder Settings (key1=value1,key2=value2):</label>
-                <input type="text" id="encoder_settings" name="encoder_settings">
-            </div>
+                    <h3>Embedding Model Configuration</h3>
+                    <label for="embed_model_name">Embedding Model Name:</label>
+                    <input type="text" id="embed_model_name" name="embed_model_name" value="default_model">
 
-            <button type="submit">Start Experiment</button>
-        </form>
+                    <label for="embed_model">Embedding Model:</label>
+                    <input type="text" id="embed_model" name="embed_model" value="text-embedding-3-large">
 
-        <div id="response"></div>
+                    <h3>Autoencoder Configuration</h3>
+                    <label for="input_size">Input Size:</label>
+                    <input type="number" id="input_size" name="input_size" value="1000">
+
+                    <label for="hidden_size">Hidden Size:</label>
+                    <input type="number" id="hidden_size" name="hidden_size" value="512">
+
+                    <label for="learning_rate">Learning Rate:</label>
+                    <input type="number" step="0.001" id="learning_rate" name="learning_rate" value="0.001">
+                </div>
+
+                <button type="submit">Start Experiment</button>
+            </form>
+
+            <div id="response"></div>
+        </div>
     </div>
 
     <script>

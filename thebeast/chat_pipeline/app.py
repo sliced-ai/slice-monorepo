@@ -23,54 +23,60 @@ class ChatPipeline:
         self.auto_encoder_trainer = AutoEncoderTrainer(encoder_config)
         
         step_data = {}
-        responses = self.inference_engine.generate_responses(input_text)
-        
-        # Ensure responses are a list of strings
-        response_texts = [response['text'] if isinstance(response, dict) and 'text' in response else str(response) for response in responses]
-        
+        response_texts = []
+        raw_responses = self.inference_engine.generate_responses(input_text)
+        # Extract data for each response
+        for index, response in enumerate(raw_responses):
+            data = self.inference_engine.extract_chat_completion_data(response)
+            # Additional processing can continue from here
+            response_texts.append(data["Response Content"])
+            
+        step_data['responses'] = response_texts  # Saving the extracted textual responses
+        self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'responses')
+    
+        # Step 2: Create embeddings
         embeddings = self.embedding_system.create_embeddings(response_texts)
-        
-        step_data['responses'] = responses
         step_data['embeddings'] = embeddings
-        
-        # Flatten the embeddings from all models into a single list
+        self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'embeddings')
+    
+        # Flatten and convert embeddings to tensors for autoencoder processing
         all_embeddings = [embed for model_embeds in embeddings.values() for embed in model_embeds]
-        
-        # Convert list of embeddings to PyTorch tensors and pad/truncate as necessary
         tensor_embeddings = [torch.tensor(embed, dtype=torch.float) for embed in all_embeddings]
-        max_length = encoder_config.get('input_size', 5000)  # Default to some value if not specified
-        padded_embeddings = torch.stack([torch.cat([t, torch.zeros(max_length - t.size(0))]) if t.size(0) < max_length else t[:max_length] for t in tensor_embeddings])
-        
+        max_length = encoder_config.get('input_size', 5000)
+        padded_embeddings = torch.stack([torch.cat([t, torch.zeros(max_length - t.size(0))]) if t.size(0) < max_length else t[:max_max_length] for t in tensor_embeddings])
+    
+        # Step 3: Train autoencoder
         combined_embedding, autoencoder_weights = self.auto_encoder_trainer.train_autoencoder(padded_embeddings)
-        
         step_data['combined_embedding'] = combined_embedding
         step_data['autoencoder_weights'] = autoencoder_weights
-        
-        self.save_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config)
-        
+        self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'autoencoder')
+    
         self.master_embeddings.append(combined_embedding)
         
         return combined_embedding
 
-    def save_step_data(self, data, step, input_text, models_config, embedding_models_config, encoder_config):
+    def save_intermediate_step_data(self, data, step, input_text, models_config, embedding_models_config, encoder_config, sub_step):
         step_folder = f"data/{self.experiment_name}/step_{step}"
         os.makedirs(step_folder, exist_ok=True)
         
-        # Save responses
-        with open(f"{step_folder}/responses.json", 'w') as f:
-            json.dump(data['responses'], f, indent=4)
+        if sub_step == 'responses':
+            # Save responses
+            with open(f"{step_folder}/responses.json", 'w') as f:
+                json.dump(data['responses'], f, indent=4)
         
-        # Save embeddings
-        with open(f"{step_folder}/embeddings.json", 'w') as f:
-            json.dump(data['embeddings'], f, indent=4)
+        if sub_step == 'embeddings':
+            # Save embeddings
+            with open(f"{step_folder}/embeddings.json", 'w') as f:
+                json.dump(data['embeddings'], f, indent=4)
         
-        # Save autoencoder weights
-        with open(f"{step_folder}/autoencoder_weights.txt", 'w') as f:
-            f.write(str(data['autoencoder_weights']))
-        
-        # Save combined embedding
-        with open(f"{step_folder}/combined_embedding.txt", 'w') as f:
-            f.write(str(data['combined_embedding']))
+        if sub_step == 'autoencoder':
+            # Save autoencoder weights
+            with open(f"{step_folder}/autoencoder_weights.txt", 'w') as f:
+                f.write(str(data['autoencoder_weights']))
+            
+            # Save combined embedding
+            with open(f"{step_folder}/combined_embedding.txt", 'w') as f:
+                f.write(str(data['combined_embedding']))
 
         # Save step configuration
         step_config = {
@@ -87,7 +93,6 @@ class ChatPipeline:
         with open(master_file, 'w') as f:
             f.write("\n".join(map(str, self.master_embeddings)))
 
-
 def get_default_models_config():
     return [
         {"name": "gpt-4o", "n": 1, "max_tokens": 150, "temperature": 0.7, "top_p": 0.9},
@@ -102,7 +107,7 @@ def get_default_embedding_models_config():
 
 def get_default_encoder_config():
     return {
-        'input_size': 1000,
+        'input_size': 5000,
         'hidden_size': 512,
         'learning_rate': 0.001
     }
@@ -114,7 +119,6 @@ def index():
 @app.route('/start_experiment', methods=['POST'])
 def start_experiment():
     experiment_name = request.form['experiment_name']
-    #api_key = request.form['api_key']
     api_key = 'sk-proj-7MAfZbOm9lPY28pubTiRT3BlbkFJGgn73o5e6sVCjoTfoFAP'
     use_default = 'use_default' in request.form
 

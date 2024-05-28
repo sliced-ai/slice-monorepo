@@ -10,10 +10,9 @@ class InferenceEngine:
     def generate_responses(self, input_text):
         all_responses = []
         for model_config in self.models_config:
-            responses = []
-            for _ in range(model_config.get('n', 1)):
+            for _ in range(model_config.get('n', 1)):  # Get number of responses per model
                 response = self.client.chat.completions.create(
-                    model="gpt-4o",  # Replace with your model ID as needed
+                    model=model_config.get('model', "gpt-4o"),
                     messages=[
                         {"role": "system", "content": "You are a helpful assistant."},
                         {"role": "user", "content": input_text}
@@ -23,35 +22,13 @@ class InferenceEngine:
                     top_p=model_config.get('top_p', 1.0),
                     frequency_penalty=model_config.get('frequency_penalty', 0.0),
                     presence_penalty=model_config.get('presence_penalty', 0.0),
-                    logprobs=True,  # Enable logprobs
-                    top_logprobs=5  # Specify number of top log probabilities to return
+                    logprobs=True,
+                    top_logprobs=5
                 )
-                responses.append(response)  # Accumulating responses for each iteration
-    
-            processed_responses = [self.extract_chat_completion_data(response) for response in responses]
-            all_responses.append(processed_responses)
+                all_responses.append(response)
         return all_responses
 
-    def get_full_response(self, prompt, n=1, max_tokens=1000, temperature=0.7, top_p=1.0, frequency_penalty=0.0, presence_penalty=0.0):
-        for _ in range(n):
-            response = self.client.chat.completions.create(
-                model="gpt-4o",  # Replace with your model ID as needed
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                frequency_penalty=frequency_penalty,
-                presence_penalty=presence_penalty,
-                logprobs=True,  # Enable logprobs
-                top_logprobs=10  # Specify number of top log probabilities to return
-            )
-    
-            return response
-
-    def extract_chat_completion_data(self, response):
+    def extract_chat_completion_data(self,response):
         # Data structure to hold the results
         data = {
             "Response Content": "",
@@ -59,7 +36,6 @@ class InferenceEngine:
             "Top Logprob Words": [],
             "Top Logprob Values": []
         }
-        
         # Assume the first choice for simplification; adapt as needed for multiple choices
         if response.choices:
             choice = response.choices[0]
