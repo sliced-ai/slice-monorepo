@@ -6,8 +6,10 @@ from inference import InferenceEngine
 from embedding import EmbeddingSystem
 from auto_encoder import AutoEncoderTrainer
 import torch
+import random
 
 app = Flask(__name__)
+pipelines = {}
 
 class ChatPipeline:
     def __init__(self, experiment_name, api_key):
@@ -15,9 +17,12 @@ class ChatPipeline:
         self.api_key = api_key
         self.history = []
         self.master_embeddings = []
+        self.step = 0
         os.makedirs(f"data/{self.experiment_name}", exist_ok=True)
 
-    def run_step(self, input_text, step, models_config, embedding_models_config, encoder_config):
+    def run_step(self, input_text, models_config, embedding_models_config, encoder_config):
+        self.step += 1  # Increment step here
+        step = self.step
         self.inference_engine = InferenceEngine(models_config)
         self.embedding_system = EmbeddingSystem(api_key=self.api_key, embedding_models_config=embedding_models_config)
         self.auto_encoder_trainer = AutoEncoderTrainer(encoder_config)
@@ -52,8 +57,8 @@ class ChatPipeline:
         self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'autoencoder')
     
         self.master_embeddings.append(combined_embedding)
-        
-        return combined_embedding
+
+        return random.choice(response_texts)
 
     def save_intermediate_step_data(self, data, step, input_text, models_config, embedding_models_config, encoder_config, sub_step):
         step_folder = f"data/{self.experiment_name}/step_{step}"
@@ -116,42 +121,49 @@ def get_default_encoder_config():
 def index():
     return render_template('index.html')
 
-@app.route('/start_experiment', methods=['POST'])
-def start_experiment():
-    experiment_name = request.form['experiment_name']
+@app.route('/chat', methods=['POST'])
+def chat():
+    experiment_name = request.form.get('experiment_name')
+    input_text = request.form.get('input_text')
     api_key = 'sk-proj-7MAfZbOm9lPY28pubTiRT3BlbkFJGgn73o5e6sVCjoTfoFAP'
     use_default = 'use_default' in request.form
 
+    # Initialize models_config, embedding_models_config, encoder_config whether it's a new or existing pipeline
     if use_default:
         models_config = get_default_models_config()
         embedding_models_config = get_default_embedding_models_config()
         encoder_config = get_default_encoder_config()
     else:
         models_config = [{
-            'name': request.form['model_name'],
-            'n': int(request.form['num_inferences']),
-            'max_tokens': int(request.form['max_tokens']),
-            'temperature': float(request.form['temperature']),
-            'top_p': float(request.form['top_p'])
+            'name': request.form.get('model_name', 'gpt-4o'),
+            'n': int(request.form.get('num_inferences', 1)),
+            'max_tokens': int(request.form.get('max_tokens', 150)),
+            'temperature': float(request.form.get('temperature', 0.7)),
+            'top_p': float(request.form.get('top_p', 0.9))
         }]
-        
         embedding_models_config = [{
-            'name': request.form['embed_model_name'],
-            'model': request.form['embed_model']
+            'name': request.form.get('embed_model_name', 'default_model'),
+            'model': request.form.get('embed_model', 'text-embedding-3-large')
         }]
-        
         encoder_config = {
-            'input_size': int(request.form['input_size']),
-            'hidden_size': int(request.form['hidden_size']),
-            'learning_rate': float(request.form['learning_rate'])
+            'input_size': int(request.form.get('input_size', 5000)),
+            'hidden_size': int(request.form.get('hidden_size', 512)),
+            'learning_rate': float(request.form.get('learning_rate', 0.001))
         }
 
-    chat_pipeline = ChatPipeline(experiment_name, api_key)
-    input_text = request.form['input_text']
-    step = 1
-    chat_pipeline.run_step(input_text, step, models_config, embedding_models_config, encoder_config)
+    # Create or retrieve existing pipeline
+    if experiment_name not in pipelines:
+        pipelines[experiment_name] = ChatPipeline(experiment_name, api_key)
+    chat_pipeline = pipelines[experiment_name]
+
+    # Run the chat step
+    if not input_text:
+        return jsonify({"error": "No input text provided"}), 400
+    chosen_response = chat_pipeline.run_step(input_text, models_config, embedding_models_config, encoder_config)
     
-    return jsonify({"message": "Experiment started successfully!"})
+    return jsonify({"message": "Chat response generated!", "chosen_response": chosen_response})
+
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=4000, debug=True)
