@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat Pipeline Experiment</title>
+    <title>BigChat</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
         .container {
@@ -31,6 +31,9 @@
             text-align: right;
             font-weight: bold;
         }
+        .visualization {
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
@@ -44,7 +47,13 @@
             </form>
         </div>
         <div class="right-side">
-            <h1>Chat Pipeline Experiment</h1>
+            <h1>BigChat</h1>
+
+            <div id="visualizations">
+                <img id="tsne-visual" class="visualization" src="" alt="TSNE Visualization" style="display:none; max-width: 100%;">
+                <img id="grid-visual" class="visualization" src="" alt="Grid Visualization" style="display:none; max-width: 100%;">
+            </div>
+
             <form id="experiment-form">
                 <label for="experiment_name">Experiment Name:</label>
                 <input type="text" id="experiment_name" name="experiment_name" required>
@@ -133,6 +142,16 @@
                 botMessage.className = 'message bot';
                 botMessage.innerText = data.chosen_response;
                 conversation.appendChild(botMessage);
+
+                if (data.tsne_fig_path) {
+                    document.getElementById('tsne-visual').src = data.tsne_fig_path;
+                    document.getElementById('tsne-visual').style.display = 'block';
+                }
+
+                if (data.grid_fig_path) {
+                    document.getElementById('grid-visual').src = data.grid_fig_path;
+                    document.getElementById('grid-visual').style.display = 'block';
+                }
 
                 document.getElementById('input_text').value = '';
                 conversation.scrollTop = conversation.scrollHeight;

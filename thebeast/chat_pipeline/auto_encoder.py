@@ -2,6 +2,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.nn.utils.rnn import pad_sequence
+import matplotlib.pyplot as plt
+from sklearn.manifold import TSNE
+import numpy as np
+from scipy.ndimage import gaussian_filter
+import matplotlib as mpl
 
 class AutoEncoder(nn.Module):
     def __init__(self, input_size, hidden_size):
@@ -29,61 +34,92 @@ class AutoEncoderTrainer:
         self.encoder_config = encoder_config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = AutoEncoder(
-            input_size=encoder_config['input_size'], 
+            input_size=encoder_config['input_size'],
             hidden_size=encoder_config['hidden_size']
         ).to(self.device)
         self.criterion = nn.MSELoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=encoder_config['learning_rate'])
 
-    def pad_and_truncate_embeddings(self, embeddings, target_length):
-        # Pad and truncate embeddings to the target length
-        padded_embeddings = []
-        for emb in embeddings:
-            if len(emb) < target_length:
-                emb = torch.cat([emb, torch.zeros(target_length - len(emb))])
-            elif len(emb) > target_length:
-                emb = emb[:target_length]
-            padded_embeddings.append(emb)
-        return torch.stack(padded_embeddings)
+    def pad_embeddings(self, embeddings, target_length):
+        padded_embeddings = pad_sequence(embeddings, batch_first=True, padding_value=0)
+        return torch.narrow(padded_embeddings, 1, 0, target_length)
 
     def train_autoencoder(self, all_embeddings, epochs=50):
+        padded_embeddings = self.pad_embeddings(all_embeddings, self.encoder_config['input_size']).to(self.device)
         self.model.train()
-        padded_embeddings = self.pad_and_truncate_embeddings(all_embeddings, self.encoder_config['input_size']).to(self.device)
         for epoch in range(epochs):
+            self.optimizer.zero_grad()
             encoded, decoded = self.model(padded_embeddings)
             loss = self.criterion(decoded, padded_embeddings)
-            self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-            if (epoch+1) % 10 == 0:
-                print(f'Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.4f}')
-        combined_embedding = encoded.mean(dim=0)  # Example of combining embeddings
-        return combined_embedding.detach().cpu().numpy(), self.model.state_dict()
+            if (epoch + 1) % 10 == 0:
+                print(f'Epoch [{epoch + 1}/{epochs}], Loss: {loss.item():.4f}')
+        combined_embedding = encoded.mean(dim=0)
+        return combined_embedding.detach().cpu().numpy(), encoded.detach().cpu().numpy(), self.model.state_dict()
+
+    def visualize_embeddings_tsne(self, embeddings, save_path='embedding_visualization_tsne.png'):
+        n_samples = len(embeddings)
+        perplexity = min(40, n_samples - 1)  # Adjust perplexity dynamically
+
+        tsne = TSNE(n_components=2, verbose=1, perplexity=perplexity, n_iter=300)
+        tsne_results = tsne.fit_transform(embeddings)
+
+        plt.figure(figsize=(10, 6))
+        mpl.style.use('seaborn-darkgrid')  # Using seaborn-dark style for a better visual appeal
+        plt.scatter(tsne_results[:, 0], tsne_results[:, 1], alpha=0.5, edgecolor='k')
+        plt.axis('off')  # Hide axes
+        plt.grid(False)  # Turn off the grid
+        plt.savefig(save_path, bbox_inches='tight', pad_inches=0)  # Save without padding and tight bounding box
+        plt.close()
+
+    def visualize_2d_grid(self, embeddings, grid_size=50, save_path='embedding_visualization_3d.png'):
+        embedding_size = embeddings.shape[1]
+        adjusted_grid_size = int(np.sqrt(embedding_size))
+
+        if adjusted_grid_size ** 2 != embedding_size:
+            embeddings = [np.pad(embed, (0, adjusted_grid_size ** 2 - embed.size), 'constant') for embed in embeddings]
+
+        smoothed_grids = np.array([gaussian_filter(embedding.reshape(adjusted_grid_size, adjusted_grid_size), sigma=2) for embedding in embeddings])
+
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        mpl.style.use('seaborn-v0_8-darkgrid')  # Consistent style
+
+        X, Y = np.meshgrid(range(adjusted_grid_size), range(adjusted_grid_size))
+        
+        for i, grid in enumerate(smoothed_grids):
+            Z = grid + i * 0.1  # Slightly offsetting each grid for better visibility
+            ax.plot_surface(X, Y, Z, cmap='viridis', edgecolor='none', alpha=0.7)
+
+        plt.axis('off')  # Hide axes
+        plt.grid(False)  # Turn off the grid
+        plt.savefig(save_path, bbox_inches='tight', pad_inches=0)
+        plt.close()
+
 
 def main():
-    # Configurations
     encoder_config = {
-        'input_size': 5000,  # Fixed input size (maximum length of embeddings)
-        'hidden_size': 512,  # Example hidden size
+        'input_size': 5000,
+        'hidden_size': 512,
         'learning_rate': 0.001
     }
 
-    # Create trainer
     trainer = AutoEncoderTrainer(encoder_config)
 
-    # Example embeddings with variable lengths
     all_embeddings = [
-        torch.randint(1000, 4001, (3000,)).float(),  # Example embedding of length 3000
-        torch.randint(1000, 4001, (1000,)).float(),  # Example embedding of length 1000
-        torch.randint(1000, 4001, (5000,)).float()   # Example embedding of length 5000
+        torch.randint(1000, 4001, (3000,)).float(),
+        torch.randint(1000, 4001, (1000,)).float(),
+        torch.randint(1000, 4001, (5000,)).float()
     ]
 
-    # Train autoencoder
-    combined_embedding, model_weights = trainer.train_autoencoder(all_embeddings)
+    combined_embedding, embeddings, model_weights = trainer.train_autoencoder(all_embeddings)
 
-    # Output results
-    print("Combined Embedding:", combined_embedding)
-    print("Autoencoder Weights:", model_weights)
+    # Visualize embeddings using t-SNE
+    trainer.visualize_embeddings_tsne(embeddings)
+
+    # Visualize embeddings as a 2D grid
+    trainer.visualize_2d_grid(embeddings)
 
 if __name__ == "__main__":
     main()
