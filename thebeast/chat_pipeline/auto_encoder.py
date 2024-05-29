@@ -7,6 +7,7 @@ from sklearn.manifold import TSNE
 import numpy as np
 from scipy.ndimage import gaussian_filter
 import os
+import json
 
 class AutoEncoder(nn.Module):
     def __init__(self, input_size, hidden_size):
@@ -58,47 +59,63 @@ class AutoEncoderTrainer:
         combined_embedding = encoded.mean(dim=0)
         return combined_embedding.detach().cpu().numpy(), encoded.detach().cpu().numpy(), self.model.state_dict()
 
-    def visualize_embeddings_tsne(self, embeddings, title='2D Visualization of Embeddings'):
+    def visualize_embeddings_tsne(self, embeddings, tsne_fig_path, json_path, title='2D Visualization of Embeddings'):
         n_samples = len(embeddings)
         perplexity = min(40, n_samples - 1)  # Set perplexity to a value less than n_samples
 
         tsne = TSNE(n_components=2, verbose=1, perplexity=perplexity, max_iter=300)
         tsne_results = tsne.fit_transform(embeddings)
+        
         plt.figure(figsize=(10, 6))
         plt.scatter(tsne_results[:, 0], tsne_results[:, 1], alpha=0.5)
         plt.title(title)
         plt.xlabel('Component 1')
         plt.ylabel('Component 2')
         plt.grid(True)
-        plt.savefig('embedding_visualization_tsne.png')
-        plt.show()
+        plt.savefig(tsne_fig_path)
+        plt.close()
 
-    def visualize_2d_grid(self, embeddings, grid_size=50, title='3D Visualization of Smoothed Text Embeddings'):
+        # Save the t-SNE results to a JSON file
+        tsne_data = {'embeddings': tsne_results.tolist()}
+        with open(json_path, 'w') as f:
+            json.dump(tsne_data, f, indent=4)
+
+
+    def visualize_2d_grid(self, embeddings, grid_fig_path, json_path, grid_size=50, title='3D Visualization of Smoothed Text Embeddings'):
         embedding_size = embeddings.shape[1]
         adjusted_grid_size = int(np.sqrt(embedding_size))
         
+        # Ensure all embeddings are reshaped to a square grid of the correct size
         if adjusted_grid_size ** 2 != embedding_size:
-            embeddings = [np.pad(embed, (0, adjusted_grid_size ** 2 - embed.size), 'constant') for embed in embeddings]
+            embeddings = [np.pad(embed, (0, adjusted_grid_size ** 2 - embed.size), 'constant', constant_values=0) for embed in embeddings]
         
-        smoothed_grids = np.array([gaussian_filter(embedding.reshape(adjusted_grid_size, adjusted_grid_size), sigma=2) for embedding in embeddings])
-
+        # Smooth the grids
+        smoothed_grids = np.array([gaussian_filter(embed.reshape(adjusted_grid_size, adjusted_grid_size), sigma=2) for embed in embeddings])
+    
+        # Plotting
         fig = plt.figure(figsize=(12, 8))
         ax = fig.add_subplot(111, projection='3d')
         
         X, Y = np.meshgrid(range(adjusted_grid_size), range(adjusted_grid_size))
         
+        # Adjust z-offset for each grid to avoid overlap
         offset = 0.0
-        for i in range(smoothed_grids.shape[0]):
-            Z = smoothed_grids[i] + i * offset  # Offset each grid
-            ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.7)
-
+        for i, grid in enumerate(smoothed_grids):
+            Z = grid + i * offset  # Offset each grid slightly on the Z-axis
+            ax.plot_surface(X, Y, Z, cmap='viridis', edgecolor='none', alpha=0.7)
+    
         ax.set_title(title)
         ax.set_xlabel('Dimension 1')
         ax.set_ylabel('Dimension 2')
         ax.set_zlabel('Embedding Value')
-
-        plt.savefig('embedding_visualization_3d.png')
-        plt.show()
+        
+        plt.savefig(grid_fig_path)  # Save directly to the provided path
+        plt.close(fig)  # Close the figure to free up memory
+        
+        # Save the grid data to a JSON file
+        grid_data = {'embeddings': smoothed_grids.tolist()}
+        with open(json_path, 'w') as f:
+            json.dump(grid_data, f, indent=4)
 
 def main():
     encoder_config = {

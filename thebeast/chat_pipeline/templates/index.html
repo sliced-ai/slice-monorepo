@@ -4,39 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BigChat</title>
+    <script src="https://d3js.org/d3.v6.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <style>
-        .container {
-            display: flex;
-        }
-        .left-side {
-            flex: 2;
-            padding: 20px;
-            border-right: 1px solid #ddd;
-        }
-        .right-side {
-            flex: 1;
-            padding: 20px;
-        }
-        .conversation {
-            border: 1px solid #ddd;
-            padding: 10px;
-            height: 400px;
-            overflow-y: scroll;
-        }
-        .message {
-            margin-bottom: 10px;
-        }
-        .message.user {
-            text-align: right;
-            font-weight: bold;
-        }
-        .visualization {
-            margin-bottom: 20px;
-        }
-    </style>
 </head>
-<body>
+<body class="light-mode">
+    <div class="toggle-container">
+        <label class="toggle-switch">
+            <input type="checkbox" id="mode-toggle">
+            <span class="slider"></span>
+        </label>
+    </div>
     <div class="container">
         <div class="left-side">
             <h2>Conversation</h2>
@@ -48,12 +26,10 @@
         </div>
         <div class="right-side">
             <h1>BigChat</h1>
-
             <div id="visualizations">
-                <img id="tsne-visual" class="visualization" src="" alt="TSNE Visualization" style="display:none; max-width: 100%;">
-                <img id="grid-visual" class="visualization" src="" alt="Grid Visualization" style="display:none; max-width: 100%;">
+                <svg id="tsne-visual" class="visualization" width="600" height="400"></svg>
+                <div id="grid-visual" class="visualization" width="800" height="600"></div>
             </div>
-
             <form id="experiment-form">
                 <label for="experiment_name">Experiment Name:</label>
                 <input type="text" id="experiment_name" name="experiment_name" required>
@@ -102,65 +78,6 @@
             <div id="response"></div>
         </div>
     </div>
-
-    <script>
-        document.getElementById('use_default').addEventListener('change', function() {
-            document.getElementById('custom-settings').style.display = this.checked ? 'none' : 'block';
-        });
-
-        document.getElementById('chat-form').addEventListener('submit', function(event) {
-            event.preventDefault();
-
-            const inputText = document.getElementById('input_text').value;
-            if (inputText.trim() === "") {
-                alert('Please enter some text.');
-                return;
-            }
-
-            const formData = new FormData(document.getElementById('experiment-form'));
-            formData.append('input_text', inputText);
-
-            fetch('/chat', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    alert(data.error);
-                    return;
-                }
-
-                document.getElementById('response').innerText = data.message;
-                const conversation = document.getElementById('conversation');
-                const userMessage = document.createElement('div');
-                userMessage.className = 'message user';
-                userMessage.innerText = inputText;
-                conversation.appendChild(userMessage);
-
-                const botMessage = document.createElement('div');
-                botMessage.className = 'message bot';
-                botMessage.innerText = data.chosen_response;
-                conversation.appendChild(botMessage);
-
-                if (data.tsne_fig_path) {
-                    document.getElementById('tsne-visual').src = data.tsne_fig_path;
-                    document.getElementById('tsne-visual').style.display = 'block';
-                }
-
-                if (data.grid_fig_path) {
-                    document.getElementById('grid-visual').src = data.grid_fig_path;
-                    document.getElementById('grid-visual').style.display = 'block';
-                }
-
-                document.getElementById('input_text').value = '';
-                conversation.scrollTop = conversation.scrollHeight;
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Failed to send message.');
-            });
-        });
-    </script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
