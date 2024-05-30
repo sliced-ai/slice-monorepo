@@ -1,3 +1,22 @@
+document.addEventListener('DOMContentLoaded', function () {
+    const bodyClass = localStorage.getItem('theme') || 'light-mode';
+    document.body.classList.add(bodyClass);
+
+    document.querySelectorAll('form, input, .conversation, .visualization').forEach(function (element) {
+        if (bodyClass === 'dark-mode') {
+            element.classList.add('dark-mode');
+            element.classList.remove('light-mode');
+        } else {
+            element.classList.add('light-mode');
+            element.classList.remove('dark-mode');
+        }
+    });
+});
+
+document.getElementById('home-button').addEventListener('click', function() {
+    window.location.href = window.location.href; // Reload the current page
+});
+
 document.getElementById('chat-form').addEventListener('submit', function(event) {
     event.preventDefault();
 
@@ -12,29 +31,47 @@ document.getElementById('chat-form').addEventListener('submit', function(event) 
 
     console.log('Submitting chat form with data:', Object.fromEntries(formData.entries()));
 
+    // Show user message
+    const conversation = document.getElementById('conversation');
+    const userMessage = document.createElement('div');
+    userMessage.className = 'message user';
+    userMessage.innerText = inputText;
+    conversation.appendChild(userMessage);
+
+    // Show loading indicator
+    const loadingIndicator = document.createElement('div');
+    loadingIndicator.className = 'message bot';
+    loadingIndicator.id = 'loading-indicator';
+    loadingIndicator.innerText = 'Processing...';
+    conversation.appendChild(loadingIndicator);
+
+    document.getElementById('input_text').value = '';
+    conversation.scrollTop = conversation.scrollHeight;
+
+    // Set a long timeout for the fetch request
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000000); // 100 minutes
+
     fetch('/chat', {
         method: 'POST',
-        body: formData
+        body: formData,
+        signal: controller.signal
     })
     .then(response => response.json())
     .then(data => {
+        clearTimeout(timeoutId); // Clear the timeout
         console.log('Received chat response:', data);
         if (data.error) {
             alert(data.error);
+            conversation.removeChild(loadingIndicator);
             return;
         }
 
-        document.getElementById('response').innerText = data.message;
-        const conversation = document.getElementById('conversation');
-        const userMessage = document.createElement('div');
-        userMessage.className = 'message user';
-        userMessage.innerText = inputText;
-        conversation.appendChild(userMessage);
-
         const botMessage = document.createElement('div');
         botMessage.className = 'message bot';
-        botMessage.innerText = data.chosen_response;
-        conversation.appendChild(botMessage);
+        botMessage.id = 'bot-message';  // Assign an ID for easy replacement
+        botMessage.innerText = data.chosen_response; // Display only the chosen response
+        conversation.replaceChild(botMessage, loadingIndicator);
 
         console.log('Fetching TSNE data from path:', data.tsne_data_path);
         console.log('Fetching Grid data from path:', data.grid_data_path);
@@ -77,177 +114,86 @@ document.getElementById('chat-form').addEventListener('submit', function(event) 
                 alert('Failed to fetch or process Grid data.');
             });
 
-        document.getElementById('input_text').value = '';
         conversation.scrollTop = conversation.scrollHeight;
     })
     .catch(error => {
+        clearTimeout(timeoutId); // Clear the timeout
         console.error('Error sending chat message:', error);
         alert('Failed to send message.');
+        conversation.removeChild(loadingIndicator);
+    });
+
+    // Periodically fetch and display the status
+    const statusInterval = setInterval(() => {
+        fetch('/status')
+            .then(response => response.json())
+            .then(statusData => {
+                console.log('Received status:', statusData);
+                loadingIndicator.innerText = `Processing... ${statusData.status}`;
+            })
+            .catch(error => {
+                console.error('Error fetching status:', error);
+                clearInterval(statusInterval);
+            });
+    }, 5000);
+});
+
+// Function to toggle between views
+document.getElementById('toggle-view').addEventListener('click', function() {
+    const visualizationContainer = document.getElementById('visualization-container');
+    const formContainer = document.getElementById('form-container');
+
+    if (visualizationContainer.classList.contains('active')) {
+        visualizationContainer.classList.remove('active');
+        formContainer.classList.add('active');
+        this.innerText = 'Show Visualizations';
+    } else {
+        visualizationContainer.classList.add('active');
+        formContainer.classList.remove('active');
+        this.innerText = 'Show Configuration';
+    }
+});
+
+// Handle dark mode button
+document.getElementById('dark-mode-btn').addEventListener('click', function() {
+    if (document.body.classList.contains('dark-mode')) {
+        document.body.classList.add('light-mode');
+        document.body.classList.remove('dark-mode');
+        localStorage.setItem('theme', 'light-mode');
+    } else {
+        document.body.classList.add('dark-mode');
+        document.body.classList.remove('light-mode');
+        localStorage.setItem('theme', 'dark-mode');
+    }
+    document.querySelectorAll('form, input, .conversation, .visualization').forEach(function(element) {
+        if (document.body.classList.contains('dark-mode')) {
+            element.classList.add('dark-mode');
+            element.classList.remove('light-mode');
+        } else {
+            element.classList.add('light-mode');
+            element.classList.remove('dark-mode');
+        }
     });
 });
 
-function createTSNEVisualization(embeddings, responses) {
-    console.log('Creating TSNE visualization with embeddings:', embeddings, 'and responses:', responses);
-    const svg = d3.select("#tsne-visual");
-    svg.selectAll("*").remove();
-    const width = +svg.attr("width");
-    const height = +svg.attr("height");
+// Update displayed experiment name when the form input changes
+document.getElementById('experiment_name').addEventListener('input', function() {
+    const experimentName = this.value.trim() || 'none';
+    document.getElementById('displayed-experiment-name').innerText = experimentName;
+});
 
-    const x = d3.scaleLinear()
-        .domain([d3.min(embeddings, d => d[0]), d3.max(embeddings, d => d[0])])
-        .range([50, width - 50]);
-
-    const y = d3.scaleLinear()
-        .domain([d3.min(embeddings, d => d[1]), d3.max(embeddings, d => d[1])])
-        .range([height - 50, 50]);
-
-    // Add X axis
-    svg.append("g")
-        .attr("transform", `translate(0,${height - 50})`)
-        .call(d3.axisBottom(x));
-
-    // Add Y axis
-    svg.append("g")
-        .attr("transform", "translate(50,0)")
-        .call(d3.axisLeft(y));
-
-    // Add Title
-    svg.append("text")
-        .attr("x", width / 2)
-        .attr("y", 30)
-        .attr("text-anchor", "middle")
-        .style("font-size", "20px")
-        .style("text-decoration", "underline")
-        .text("t-SNE Visualization");
-
-    svg.selectAll("circle")
-        .data(embeddings)
-        .enter().append("circle")
-        .attr("cx", d => x(d[0]))
-        .attr("cy", d => y(d[1]))
-        .attr("r", 5)
-        .style("fill", "orange")
-        .on("click", function(event, d) {
-            const index = embeddings.indexOf(d);
-            console.log('TSNE point clicked:', d, 'index:', index, 'response:', responses[index]);
-            updateChatWindow(responses[index]);
-            highlightTSNEPoint(index);
-            highlightGridPlane(index);
-        });
-
-    function highlightTSNEPoint(index) {
-        svg.selectAll("circle").classed("highlight", false);
-        svg.selectAll("circle").filter((d, i) => i === index).classed("highlight", true);
-    }
-
-    // Make sure to define highlightGridPlane
-    function highlightGridPlane(index) {
-        const gridPlot = document.getElementById('grid-visual');
-        if (gridPlot && gridPlot.data && Array.isArray(gridPlot.data[index].z)) {
-            Plotly.restyle(gridPlot, 'surfacecolor', gridPlot.data.map((d, i) => {
-                return i === index ? d.z.map(row => row.map(() => 'blue')) : null;
-            }));
-            console.log(`Highlighting plane for response ${index + 1}`);
-        } else {
-            console.error('Invalid grid data or gridPlot object:', gridPlot);
-        }
-    }
-}
-function createGridVisualization(embeddings, responses) {
-    console.log('Received grid data for visualization:', embeddings);
-    console.log('Associated responses:', responses);
-
-    // Verify that the data is in the expected format
-    if (!embeddings.every(e => Array.isArray(e) && e.every(row => Array.isArray(row)))) {
-        console.error('Grid data is not in the expected 2D array format:', embeddings);
-        return; // Exit if data is incorrectly formatted
-    }
-
-    // Log each grid and its dimensions
-    embeddings.forEach((grid, index) => {
-        console.log(`Grid ${index + 1} dimensions: ${grid.length}x${grid[0].length}`);
-        console.log(`Grid ${index + 1} data:`, grid);
-    });
-
-    const data = embeddings.map((grid, i) => {
-        return {
-            z: grid,
-            type: 'surface',
-            name: `Response ${i + 1}`,
-            showscale: false,
-            text: responses[i],
-            hoverinfo: 'text',
-            hovertemplate: `<b>Response:</b> ${responses[i]}<extra></extra>`
-        };
-    });
-
-    const layout = {
-        title: '3D Visualization of Smoothed Text Embeddings',
-        autosize: true,
-        width: 800,
-        height: 600,
-        scene: {
-            xaxis: { title: 'Dimension 1' },
-            yaxis: { title: 'Dimension 2' },
-            zaxis: { title: 'Embedding Value' }
-        }
-    };
-
-    // Rendering the plot
-    Plotly.newPlot('grid-visual', data, layout).then(() => {
-        console.log('Grid visualization rendered successfully.');
-    }).catch(error => {
-        console.error('Failed to render grid visualization:', error);
-    });
-
-    const gridPlot = document.getElementById('grid-visual');
-    gridPlot.on('plotly_click', function(data) {
-        if (data.points.length > 0) {
-            const index = data.points[0].curveNumber;
-            console.log('Grid plane clicked:', index);
-            const responseText = responses[index] || 'Response not available';
-            updateChatWindow(responseText);
-            highlightGridPlane(index);
-            highlightTSNEPoint(index);
-        }
-    });
-
-    function highlightGridPlane(index) {
-        if (gridPlot && gridPlot.data && Array.isArray(gridPlot.data[index].z)) {
-            const highlightColor = 'blue';
-            const originalColor = null;
-
-            const updatedColors = gridPlot.data.map((d, i) => {
-                if (i === index) {
-                    return { surfacecolor: d.z.map(row => row.map(() => highlightColor)) };
-                } else {
-                    return { surfacecolor: originalColor };
-                }
-            });
-
-            Plotly.restyle('grid-visual', updatedColors).then(() => {
-                console.log(`Highlighting plane for response ${index + 1}`);
-            }).catch(error => {
-                console.error('Error highlighting grid plane:', error);
-            });
-        } else {
-            console.error('Invalid grid data or gridPlot object:', gridPlot);
-        }
-    }
-
-    // Make sure to define highlightTSNEPoint
-    function highlightTSNEPoint(index) {
-        d3.select("#tsne-visual").selectAll("circle").classed("highlight", false);
-        d3.select("#tsne-visual").selectAll("circle").filter((d, i) => i === index).classed("highlight", true);
-    }
-}
-
+// Update chat window with new responses
 function updateChatWindow(responseText) {
-    console.log('Updating chat window with response:', responseText);
     const conversation = document.getElementById('conversation');
-    const botMessage = document.createElement('div');
-    botMessage.className = 'message bot';
-    botMessage.innerText = responseText || 'Response not available';
-    conversation.appendChild(botMessage);
-    conversation.scrollTop = conversation.scrollHeight;
+    const lastBotMessage = Array.from(conversation.getElementsByClassName('message bot')).pop();
+    if (lastBotMessage) {
+        lastBotMessage.innerText = responseText || 'Response not available';
+    } else {
+        const newBotMessage = document.createElement('div');
+        newBotMessage.className = 'message bot';
+        newBotMessage.id = 'bot-message';
+        newBotMessage.innerText = responseText || 'Response not available';
+        conversation.appendChild(newBotMessage);
+        conversation.scrollTop = conversation.scrollHeight;
+    }
 }

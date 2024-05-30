@@ -29,6 +29,11 @@ class ChatPipeline:
         
         step_data = {}
         response_texts = []
+        
+        # Update status
+        with open('/tmp/inference_status.txt', 'w') as f:
+            f.write("Inferencing messages")
+            
         raw_responses = self.inference_engine.generate_responses(input_text)
         for index, response in enumerate(raw_responses):
             data = self.inference_engine.extract_chat_completion_data(response)
@@ -36,20 +41,28 @@ class ChatPipeline:
             
         step_data['responses'] = response_texts
         self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'responses')
-    
+        
+        # Update status
+        with open('/tmp/inference_status.txt', 'w') as f:
+            f.write("Embedding messages")
+            
         embeddings = self.embedding_system.create_embeddings(response_texts)
         step_data['embeddings'] = embeddings
         self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'embeddings')
-    
+        
         all_embeddings = [embed for model_embeds in embeddings.values() for embed in model_embeds]
         tensor_embeddings = [torch.tensor(embed, dtype=torch.float) for embed in all_embeddings]
         max_length = encoder_config.get('input_size', 5000)
         padded_embeddings = torch.stack([torch.cat([t, torch.zeros(max_length - t.size(0))]) if t.size(0) < max_length else t[:max_length] for t in tensor_embeddings])
-    
+        
+        # Update status
+        with open('/tmp/inference_status.txt', 'w') as f:
+            f.write("Training autoencoder")
+            
         combined_embedding, autoencoder_encoded_embeddings, autoencoder_weights = self.auto_encoder_trainer.train_autoencoder(padded_embeddings)
         step_data['combined_embedding'] = combined_embedding
         step_data['autoencoder_weights'] = autoencoder_weights
-    
+        
         tsne_fig_path = f"data/{self.experiment_name}/step_{step}/embedding_visualization_tsne.png"
         grid_fig_path = f"data/{self.experiment_name}/step_{step}/embedding_visualization_3d.png"
         tsne_data_path = f"data/{self.experiment_name}/step_{step}/tsne_data.json"
@@ -63,12 +76,11 @@ class ChatPipeline:
         step_data['grid_data_path'] = grid_data_path
         
         self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'autoencoder')
-    
+        
         self.master_embeddings.append(combined_embedding)
         self.history.append(step_data)  # Append step data to history
-    
+        
         return random.choice(response_texts), tsne_fig_path, grid_fig_path, tsne_data_path, grid_data_path
-    
 
     def save_intermediate_step_data(self, data, step, input_text, models_config, embedding_models_config, encoder_config, sub_step):
         step_folder = f"data/{self.experiment_name}/step_{step}"
@@ -179,6 +191,15 @@ def chat():
     }
     return jsonify(data)
 
+@app.route('/status', methods=['GET'])
+def status():
+    if os.path.exists('/tmp/inference_status.txt'):
+        with open('/tmp/inference_status.txt', 'r') as f:
+            status = f.read()
+    else:
+        status = "No current status."
+
+    return jsonify({'status': status})
 
 @app.route('/data/<path:filename>')
 def data(filename):

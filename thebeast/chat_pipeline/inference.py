@@ -1,4 +1,8 @@
 from openai import OpenAI
+import openai
+import time
+import multiprocessing
+import random
 
 API_KEY = 'sk-proj-7MAfZbOm9lPY28pubTiRT3BlbkFJGgn73o5e6sVCjoTfoFAP'
 
@@ -6,29 +10,79 @@ class InferenceEngine:
     def __init__(self, models_config):
         self.models_config = models_config
         self.client = OpenAI(api_key=API_KEY)
-
+    
     def generate_responses(self, input_text):
-        all_responses = []
+        def worker(model_config, n_responses, input_text, return_dict, index):
+            responses = []
+            for _ in range(n_responses):
+                while True:
+                    try:
+                        response = self.client.chat.completions.create(
+                            model=model_config.get('model', "gpt-4o"),
+                            messages=[
+                                {"role": "system", "content": "You are a helpful assistant."},
+                                {"role": "user", "content": input_text}
+                            ],
+                            max_tokens=model_config.get('max_tokens', 1000),
+                            temperature=model_config.get('temperature', 0.7),
+                            top_p=model_config.get('top_p', 1.0),
+                            frequency_penalty=model_config.get('frequency_penalty', 0.0),
+                            presence_penalty=model_config.get('presence_penalty', 0.0),
+                            logprobs=True,
+                            top_logprobs=5
+                        )
+                        responses.append(response)
+                        break
+                    except openai.RateLimitError as e:
+                        wait_time = random.uniform(1, 300)  # Randomized wait time
+                        print(f"Rate limit hit. Process {index} waiting for {wait_time} seconds. Error: {e}")
+                        time.sleep(wait_time)
+                    except openai.APIError as e:
+                        print(f"OpenAI API returned an API Error: {e}")
+                        break
+                    except openai.APIConnectionError as e:
+                        print(f"Failed to connect to OpenAI API: {e}")
+                        time.sleep(2)
+                    except Exception as e:
+                        print(f"Unexpected error in process {index}: {e}")
+                        break
+            return_dict[index] = responses
+            print(f"Process {index} completed with {n_responses} responses.")
+    
+        manager = multiprocessing.Manager()
+        return_dict = manager.dict()
+        jobs = []
+    
+        total_responses = sum(model_config.get('n', 1) for model_config in self.models_config)
+        max_responses_per_process = 5  # Set the max responses per process
+        num_processes = (total_responses + max_responses_per_process - 1) // max_responses_per_process
+    
+        print(f"Total responses to generate: {total_responses}")
+        print(f"Running inference with {num_processes} processes.")
+    
+        current_process = 0
         for model_config in self.models_config:
-            for _ in range(model_config.get('n', 1)):  # Get number of responses per model
-                response = self.client.chat.completions.create(
-                    model=model_config.get('model', "gpt-4o"),
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant."},
-                        {"role": "user", "content": input_text}
-                    ],
-                    max_tokens=model_config.get('max_tokens', 1000),
-                    temperature=model_config.get('temperature', 0.7),
-                    top_p=model_config.get('top_p', 1.0),
-                    frequency_penalty=model_config.get('frequency_penalty', 0.0),
-                    presence_penalty=model_config.get('presence_penalty', 0.0),
-                    logprobs=True,
-                    top_logprobs=5
-                )
-                all_responses.append(response)
+            n_responses = model_config.get('n', 1)
+            while n_responses > 0:
+                responses_for_this_process = min(n_responses, max_responses_per_process)
+                n_responses -= responses_for_this_process
+    
+                p = multiprocessing.Process(target=worker, args=(model_config, responses_for_this_process, input_text, return_dict, current_process))
+                jobs.append(p)
+                p.start()
+                current_process += 1
+    
+        for proc in jobs:
+            proc.join()
+    
+        all_responses = []
+        for responses in return_dict.values():
+            all_responses.extend(responses)
+    
+        print(f"Total responses generated: {len(all_responses)}")
         return all_responses
 
-    def extract_chat_completion_data(self,response):
+    def extract_chat_completion_data(self, response):
         # Data structure to hold the results
         data = {
             "Response Content": "",
