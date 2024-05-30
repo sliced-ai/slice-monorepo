@@ -1,4 +1,19 @@
-/* Existing styles */
+/* 
+    Style Guide Index:
+    1. General Styles
+    2. Light and Dark Modes
+    3. Navbar Styles
+    4. Container and Layout
+    5. Forms and Inputs
+    6. Buttons
+    7. Project Summary Styles
+    8. Visualization Styles
+    9. Conversation Styles
+    10. Toggle Buttons
+    11. Additional Styles
+*/
+
+/* 1. General Styles */
 body {
     font-family: 'Roboto', sans-serif;
     margin: 0;
@@ -6,6 +21,12 @@ body {
     transition: background-color 0.3s, color 0.3s;
 }
 
+h1, h2 {
+    text-align: center;
+    color: #845c3d; /* Updated to darker brown */
+}
+
+/* 2. Light and Dark Modes */
 .light-mode {
     background-color: #ffffff;
     color: #000000;
@@ -16,6 +37,7 @@ body {
     color: #eaeaea;
 }
 
+/* 3. Navbar Styles */
 .navbar {
     display: flex;
     justify-content: space-between;
@@ -67,10 +89,16 @@ body {
     background-color: rgba(255, 255, 255, 0.1); /* Updated to match theme */
 }
 
+/* 4. Container and Layout */
+#form-container {
+    display: block; /* Ensure the form is shown by default */
+}
+
 .container {
     display: flex;
     height: calc(100vh - 60px);
     overflow: hidden;
+    padding: 20px;
 }
 
 .left-side, .right-side {
@@ -98,11 +126,7 @@ body {
     background-color: #2c2c2c;
 }
 
-h1, h2 {
-    text-align: center;
-    color: #845c3d; /* Updated to darker brown */
-}
-
+/* 5. Forms and Inputs */
 form {
     background: #333333;
     padding: 20px;
@@ -145,6 +169,7 @@ input[type="number"].light-mode {
     border: 1px solid #ccc;
 }
 
+/* 6. Buttons */
 button {
     display: inline-block;
     padding: 10px 20px;
@@ -161,32 +186,73 @@ button:hover {
     background: #af7b51; /* Same color as normal for consistency */
 }
 
-#custom-settings {
-    display: block; /* Ensure custom settings are visible */
+.view-btn {
+    background: #845c3d;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 10px 20px;
+    cursor: pointer;
+    margin-right: 20px;
+    font-size: 16px;
 }
 
-#response {
-    margin-top: 20px;
-    text-align: center;
+.view-btn:hover {
+    background: #6b4831;
 }
 
-/* Toggle container visibility */
-.content-container {
-    display: none;
+/* 7. Project Summary Styles */
+.projects-list {
+    list-style-type: none;
+    padding: 0;
 }
 
-.content-container.active {
-    display: block;
-}
-
-/* Visualization Styles */
-.visualization {
-    margin-top: 20px;
+.project-summary {
+    display: flex;
+    align-items: center;
+    background-color: #f4f4f4;
     border: 1px solid #ccc;
-    border-radius: 5px;
-    padding: 10px;
-    background-color: #fff;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
+
+.project-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.project-info h2 {
+    margin: 0;
+    font-size: 1.5em;
+    color: #333;
+}
+
+.project-info p {
+    margin: 5px 0;
+    color: #555;
+}
+
+/* 8. Visualization Styles */
+.visualization {
+    display: block;
+    margin: 20px auto; /* Ensure some margin for spacing */
+    text-align: center;
+    width: 100%; /* Ensure consistent width for visualizations */
+    height: 50vh; /* Set a height to take up half of the container height */
+    box-sizing: border-box; /* Include padding and border in the element's total width and height */
+}
+
+#visualization-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%; /* Ensure container width is 100% */
+    height: 100%; /* Ensure container height is 100% */
+    overflow: hidden; /* Ensure no overflow */
+}
+
 
 .visualization.light-mode {
     background-color: #fff;
@@ -196,7 +262,7 @@ button:hover {
     background-color: #444;
 }
 
-/* Conversation Styles */
+/* 9. Conversation Styles */
 .conversation {
     margin-top: 20px;
     display: flex;
@@ -224,7 +290,13 @@ button:hover {
     color: #000;
 }
 
-/* Toggle Buttons */
+.message.highlight {
+    border: 2px solid #af7b51;
+    padding: 8px;
+    border-radius: 5px;
+}
+
+/* 10. Toggle Buttons */
 .toggle-buttons {
     display: flex;
     justify-content: center;
@@ -232,7 +304,7 @@ button:hover {
     margin-bottom: 20px;
 }
 
-/* Experiment Name Display */
+/* 11. Additional Styles */
 #experiment-name-display {
     text-align: center;
     margin-bottom: 10px;
@@ -241,8 +313,22 @@ button:hover {
     color: #845c3d; /* Updated to darker brown */
 }
 
-/* Additional Styles */
 #dark-mode-btn {
     width: 100%;
     margin-top: 10px;
+}
+
+#custom-settings {
+    display: block; /* Ensure custom settings are visible */
+}
+
+#response {
+    margin-top: 20px;
+    text-align: center;
+}
+
+.placeholder {
+    text-align: center;
+    font-size: 1.2em;
+    color: #666;
 }

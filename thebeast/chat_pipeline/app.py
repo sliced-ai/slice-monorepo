@@ -142,6 +142,29 @@ def get_default_encoder_config():
 def index():
     return render_template('index.html')
 
+@app.route('/projects')
+def projects():
+    projects_data = []
+    data_dir = 'data'
+    if os.path.exists(data_dir):
+        for experiment_name in os.listdir(data_dir):
+            experiment_dir = os.path.join(data_dir, experiment_name)
+            if os.path.isdir(experiment_dir):
+                project_info = {'name': experiment_name, 'steps': 0, 'token_estimate': 0}
+                for step in os.listdir(experiment_dir):
+                    step_dir = os.path.join(experiment_dir, step)
+                    if os.path.isdir(step_dir):
+                        project_info['steps'] += 1
+                        responses_file = os.path.join(step_dir, 'responses.json')
+                        if os.path.exists(responses_file):
+                            with open(responses_file, 'r') as f:
+                                responses = json.load(f)
+                                token_count = sum(len(response.split()) for response in responses)
+                                project_info['token_estimate'] += token_count
+                projects_data.append(project_info)
+    return render_template('projects.html', projects=projects_data)
+
+
 @app.route('/chat', methods=['POST'])
 def chat():
     experiment_name = request.form.get('experiment_name')
@@ -190,6 +213,38 @@ def chat():
         'responses': chat_pipeline.history[-1]['responses']  # Pass the actual responses
     }
     return jsonify(data)
+
+@app.route('/project_data/<project_name>', methods=['GET'])
+def project_data(project_name):
+    project_path = os.path.join('data', project_name)
+    if not os.path.exists(project_path):
+        return jsonify({"error": "Project not found"}), 404
+    
+    project_data = {'name': project_name, 'steps': []}
+    for step in os.listdir(project_path):
+        step_path = os.path.join(project_path, step)
+        if os.path.isdir(step_path):
+            step_info = {'step': step}
+            responses_file = os.path.join(step_path, 'responses.json')
+            tsne_data_file = os.path.join(step_path, 'tsne_data.json')
+            grid_data_file = os.path.join(step_path, 'grid_data.json')
+            step_config_file = os.path.join(step_path, 'step_config.json')
+            if os.path.exists(responses_file):
+                with open(responses_file, 'r') as f:
+                    step_info['responses'] = json.load(f)
+            if os.path.exists(tsne_data_file):
+                with open(tsne_data_file, 'r') as f:
+                    step_info['tsne_data'] = json.load(f)
+            if os.path.exists(grid_data_file):
+                with open(grid_data_file, 'r') as f:
+                    step_info['grid_data'] = json.load(f)
+            if os.path.exists(step_config_file):
+                with open(step_config_file, 'r') as f:
+                    step_info['step_config'] = json.load(f)
+            project_data['steps'].append(step_info)
+    return jsonify(project_data)
+
+
 
 @app.route('/status', methods=['GET'])
 def status():

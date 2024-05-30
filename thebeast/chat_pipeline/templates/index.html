@@ -12,8 +12,7 @@
     <div class="navbar">
         <button id="home-button" class="nav-btn">BigChat</button>
         <div class="nav-center">
-            <button class="nav-btn">Projects</button>
-            <button class="nav-btn">Data</button>
+            <button id="projects-button" class="nav-btn">Projects</button>
         </div>
         <div class="nav-right">
             <button class="profile-btn">C</button>
@@ -84,5 +83,88 @@
     </div>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
     <script src="{{ url_for('static', filename='visualizations.js') }}"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const params = new URLSearchParams(window.location.search);
+            const projectName = params.get('project');
+            if (projectName) {
+                fetch(`/project_data/${projectName}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            alert(data.error);
+                        } else {
+                            populateChatWindow(data);
+                        }
+                    })
+                    .catch(error => console.error('Error fetching project data:', error));
+            }
+        });
+        function populateChatWindow(projectData) {
+            const conversation = document.getElementById('conversation');
+            conversation.innerHTML = '';  // Clear existing content
+        
+            projectData.steps.forEach((step, stepIndex) => {
+                // Insert user's input
+                const userInput = step.step_config.input_text;
+                const userMessage = document.createElement('div');
+                userMessage.className = 'message user';
+                userMessage.dataset.stepIndex = stepIndex;
+                userMessage.innerText = userInput;
+                conversation.appendChild(userMessage);
+        
+                // Insert a single randomly chosen response
+                const responses = step.responses;
+                const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+                const botMessage = document.createElement('div');
+                botMessage.className = 'message bot';
+                botMessage.dataset.stepIndex = stepIndex;
+                botMessage.innerText = randomResponse;
+                conversation.appendChild(botMessage);
+            });
+        
+            document.getElementById('displayed-experiment-name').innerText = projectData.name;
+        
+            // Use the latest step's data for initial visualizations
+            updateVisualizations(projectData.steps.length - 1, projectData);
+        
+            // Add click event listeners for messages
+            document.querySelectorAll('.message').forEach(message => {
+                message.addEventListener('click', function () {
+                    const stepIndex = parseInt(this.dataset.stepIndex);
+                    updateVisualizations(stepIndex, projectData);
+                    highlightMessage(stepIndex);
+                });
+            });
+        }
+        
+        function updateVisualizations(stepIndex, projectData) {
+            const step = projectData.steps[stepIndex];
+        
+            if (step.tsne_data && step.tsne_data.embeddings) {
+                createTSNEVisualization(step.tsne_data.embeddings, step.responses);
+            } else {
+                console.log('No TSNE data available for step', stepIndex);
+            }
+        
+            if (step.grid_data && step.grid_data.embeddings) {
+                createGridVisualization(step.grid_data.embeddings, step.responses);
+            } else {
+                console.log('No Grid data available for step', stepIndex);
+            }
+        }
+        
+        function highlightMessage(stepIndex) {
+            document.querySelectorAll('.message').forEach(message => {
+                message.classList.remove('highlight');
+                if (parseInt(message.dataset.stepIndex) === stepIndex) {
+                    message.classList.add('highlight');
+                }
+            });
+        }
+
+
+
+    </script>
 </body>
 </html>

@@ -11,10 +11,15 @@ document.addEventListener('DOMContentLoaded', function () {
             element.classList.remove('dark-mode');
         }
     });
+
+    // Add event listener for the Projects button
+    document.getElementById('projects-button').addEventListener('click', function() {
+        window.location.href = '/projects';
+    });
 });
 
 document.getElementById('home-button').addEventListener('click', function() {
-    window.location.href = window.location.href; // Reload the current page
+    window.location.href = '/';
 });
 
 document.getElementById('chat-form').addEventListener('submit', function(event) {
@@ -143,14 +148,14 @@ document.getElementById('toggle-view').addEventListener('click', function() {
     const visualizationContainer = document.getElementById('visualization-container');
     const formContainer = document.getElementById('form-container');
 
-    if (visualizationContainer.classList.contains('active')) {
-        visualizationContainer.classList.remove('active');
-        formContainer.classList.add('active');
-        this.innerText = 'Show Visualizations';
-    } else {
-        visualizationContainer.classList.add('active');
-        formContainer.classList.remove('active');
+    if (visualizationContainer.style.display === 'none') {
+        visualizationContainer.style.display = 'block';
+        formContainer.style.display = 'none';
         this.innerText = 'Show Configuration';
+    } else {
+        visualizationContainer.style.display = 'none';
+        formContainer.style.display = 'block';
+        this.innerText = 'Show Visualizations';
     }
 });
 
