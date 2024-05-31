@@ -16,3 +16,4 @@ infastructure/.DS_Store
 *.log
 *.chk
 llama-2-7b-chat/
+/workspace/slice-monorepo/thebeast/chat_pipeline/data

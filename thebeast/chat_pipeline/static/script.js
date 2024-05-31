@@ -202,3 +202,50 @@ function updateChatWindow(responseText) {
         conversation.scrollTop = conversation.scrollHeight;
     }
 }
+
+    function populateChatWindow(projectData) {
+        const conversation = document.getElementById('conversation');
+        conversation.innerHTML = '';  // Clear existing content
+
+        projectData.steps.forEach((step, stepIndex) => {
+            // Insert user's input
+            const userInput = step.step_config.input_text;
+            const userMessage = document.createElement('div');
+            userMessage.className = 'message user';
+            userMessage.dataset.stepIndex = stepIndex;
+            userMessage.innerText = userInput;
+            conversation.appendChild(userMessage);
+
+            // Insert a single randomly chosen response
+            const responses = step.responses;
+            const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+            const botMessage = document.createElement('div');
+            botMessage.className = 'message bot';
+            botMessage.dataset.stepIndex = stepIndex;
+            botMessage.innerText = randomResponse;
+            conversation.appendChild(botMessage);
+        });
+
+        document.getElementById('displayed-experiment-name').innerText = projectData.name;
+
+        // Use the latest step's data for initial visualizations
+        updateVisualizations(projectData.steps.length - 1, projectData);
+
+        // Add click event listeners for messages
+        document.querySelectorAll('.message').forEach(message => {
+            message.addEventListener('click', function () {
+                const stepIndex = parseInt(this.dataset.stepIndex);
+                updateVisualizations(stepIndex, projectData);
+                highlightMessage(stepIndex);
+            });
+        });
+    }
+
+    function highlightMessage(stepIndex) {
+        document.querySelectorAll('.message').forEach(message => {
+            message.classList.remove('highlight');
+            if (parseInt(message.dataset.stepIndex) === stepIndex) {
+                message.classList.add('highlight');
+            }
+        });
+    }

@@ -1,5 +1,5 @@
 function createTSNEVisualization(embeddings, responses) {
-    console.log('Creating TSNE visualization with embeddings:', embeddings, 'and responses:', responses);
+    console.log('Creating UMAP visualization with embeddings:', embeddings, 'and responses:', responses);
     const svg = d3.select("#tsne-visual");
     svg.selectAll("*").remove();
     const width = +svg.attr("width");
@@ -27,7 +27,7 @@ function createTSNEVisualization(embeddings, responses) {
         .attr("text-anchor", "middle")
         .style("font-size", "20px")
         .style("text-decoration", "underline")
-        .text("t-SNE Visualization");
+        .text("UMAP Visualization");
 
     svg.selectAll("circle")
         .data(embeddings)
@@ -38,13 +38,13 @@ function createTSNEVisualization(embeddings, responses) {
         .style("fill", "orange")
         .on("click", function(event, d) {
             const index = embeddings.indexOf(d);
-            console.log('TSNE point clicked:', d, 'index:', index, 'response:', responses[index]);
+            console.log('UMAP point clicked:', d, 'index:', index, 'response:', responses[index]);
             updateChatWindow(responses[index]);
-            highlightTSNEPoint(index);
+            highlightUMAPPoint(index);
             highlightGridPlane(index);
         });
 
-    function highlightTSNEPoint(index) {
+    function highlightUMAPPoint(index) {
         svg.selectAll("circle").classed("highlight", false);
         svg.selectAll("circle").filter((d, i) => i === index).classed("highlight", true);
     }
@@ -61,6 +61,7 @@ function createTSNEVisualization(embeddings, responses) {
         }
     }
 }
+
 
 function createGridVisualization(embeddings, responses) {
     console.log('Received grid data for visualization:', embeddings);

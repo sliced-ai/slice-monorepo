@@ -8,6 +8,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 import os
 import json
+import umap.umap_ as umap
 
 class AutoEncoder(nn.Module):
     def __init__(self, input_size, hidden_size):
@@ -45,7 +46,7 @@ class AutoEncoderTrainer:
         padded_embeddings = pad_sequence(embeddings, batch_first=True, padding_value=0)
         return torch.narrow(padded_embeddings, 1, 0, target_length)
 
-    def train_autoencoder(self, all_embeddings, epochs=50):
+    def train_autoencoder(self, all_embeddings, epochs=500):
         padded_embeddings = self.pad_embeddings(all_embeddings, self.encoder_config['input_size']).to(self.device)
         self.model.train()
         for epoch in range(epochs):
@@ -54,31 +55,37 @@ class AutoEncoderTrainer:
             loss = self.criterion(decoded, padded_embeddings)
             loss.backward()
             self.optimizer.step()
-            if (epoch + 1) % 10 == 0:
-                print(f'Epoch [{epoch + 1}/{epochs}], Loss: {loss.item():.4f}')
+            if (epoch + 1) % 2 == 0:
+                print(f'Epoch [{epoch + 1}/{epochs}], Loss: {loss.item()}')
         combined_embedding = encoded.mean(dim=0)
         return combined_embedding.detach().cpu().numpy(), encoded.detach().cpu().numpy(), self.model.state_dict()
 
-    def visualize_embeddings_tsne(self, embeddings, tsne_fig_path, json_path, title='2D Visualization of Embeddings'):
-        n_samples = len(embeddings)
-        perplexity = min(40, n_samples - 1)  # Set perplexity to a value less than n_samples
 
-        tsne = TSNE(n_components=2, verbose=1, perplexity=perplexity, max_iter=300)
-        tsne_results = tsne.fit_transform(embeddings)
-        
+
+    def visualize_embeddings_tsne(self, embeddings, tsne_fig_path, json_path, title='2D Visualization of Embeddings'):
+        n_neighbors = min(15, len(embeddings) - 1)  # Ensure n_neighbors is valid for the dataset size
+        reducer = umap.UMAP(n_components=2, n_neighbors=n_neighbors, min_dist=0.1, random_state=42)
+        try:
+            umap_results = reducer.fit_transform(embeddings)
+        except ValueError as e:
+            print(f"UMAP error: {e}")
+            # Handle potential zero-size array error or disconnected vertices
+            umap_results = reducer.fit_transform(embeddings[:n_neighbors])  # Use a subset if necessary
+    
         plt.figure(figsize=(10, 6))
-        plt.scatter(tsne_results[:, 0], tsne_results[:, 1], alpha=0.5)
+        plt.scatter(umap_results[:, 0], umap_results[:, 1], alpha=0.5)
         plt.title(title)
         plt.xlabel('Component 1')
         plt.ylabel('Component 2')
         plt.grid(True)
         plt.savefig(tsne_fig_path)
         plt.close()
-
-        # Save the t-SNE results to a JSON file
-        tsne_data = {'embeddings': tsne_results.tolist()}
+    
+        # Save the UMAP results to a JSON file
+        umap_data = {'embeddings': umap_results.tolist()}
         with open(json_path, 'w') as f:
-            json.dump(tsne_data, f, indent=4)
+            json.dump(umap_data, f, indent=4)
+
 
 
     def visualize_2d_grid(self, embeddings, grid_fig_path, json_path, grid_size=50, title='3D Visualization of Smoothed Text Embeddings'):

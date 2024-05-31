@@ -18,7 +18,7 @@ class InferenceEngine:
                 while True:
                     try:
                         response = self.client.chat.completions.create(
-                            model=model_config.get('model', "gpt-4o"),
+                            model=model_config.get('name', "gpt-4o"),
                             messages=[
                                 {"role": "system", "content": "You are a helpful assistant."},
                                 {"role": "user", "content": input_text}
@@ -114,7 +114,6 @@ class InferenceEngine:
                 data["Top Logprob Values"].append(top_values)
     
         return data
-
 
 # Testing the modified InferenceEngine
 if __name__ == "__main__":
