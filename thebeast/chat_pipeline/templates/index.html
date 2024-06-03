@@ -148,7 +148,7 @@
             }
         
             if (step.grid_data && step.grid_data.embeddings) {
-                createGridVisualization(step.grid_data.embeddings, step.responses);
+                createGridVisualization(step.tsne_data.embeddings, step.responses);
             } else {
                 console.log('No Grid data available for step', stepIndex);
             }

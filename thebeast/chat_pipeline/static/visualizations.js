@@ -61,89 +61,71 @@ function createTSNEVisualization(embeddings, responses) {
         }
     }
 }
-
-
 function createGridVisualization(embeddings, responses) {
-    console.log('Received grid data for visualization:', embeddings);
-    console.log('Associated responses:', responses);
+    console.log('Creating 3D visualization with embeddings:', embeddings, 'and responses:', responses);
 
-    if (!embeddings.every(e => Array.isArray(e) && e.every(row => Array.isArray(row)))) {
-        console.error('Grid data is not in the expected 2D array format:', embeddings);
-        return;
-    }
+    // Add a constant third dimension to the embeddings
+    const embeddings3D = embeddings.map(d => [d[0], d[1], 0]); // Third dimension is currently 0
 
-    embeddings.forEach((grid, index) => {
-        console.log(`Grid ${index + 1} dimensions: ${grid.length}x${grid[0].length}`);
-        console.log(`Grid ${index + 1} data:`, grid);
-    });
-
-    const data = embeddings.map((grid, i) => {
-        return {
-            z: grid,
-            type: 'surface',
-            name: `Response ${i + 1}`,
-            showscale: false,
-            text: responses[i],
-            hoverinfo: 'text',
-            hovertemplate: `<b>Response:</b> ${responses[i]}<extra></extra>`
-        };
-    });
-
-    const layout = {
-        title: '3D Visualization of Smoothed Text Embeddings',
-        autosize: true,
-        width: 800,
-        height: 600,
-        scene: {
-            xaxis: { title: 'Dimension 1' },
-            yaxis: { title: 'Dimension 2' },
-            zaxis: { title: 'Embedding Value' }
+    const trace = {
+        x: embeddings3D.map(d => d[0]),
+        y: embeddings3D.map(d => d[1]),
+        z: embeddings3D.map(d => d[2]),
+        mode: 'markers',
+        type: 'scatter3d',
+        text: responses,
+        marker: {
+            size: 5,
+            color: 'orange'
         }
     };
 
-    Plotly.newPlot('grid-visual', data, layout).then(() => {
+    const layout = {
+        title: '3D UMAP Visualization',
+        scene: {
+            xaxis: {title: 'UMAP 1'},
+            yaxis: {title: 'UMAP 2'},
+            zaxis: {title: 'UMAP 3'},
+        }
+    };
+
+    Plotly.newPlot('grid-visual', [trace], layout).then(() => {
         console.log('Grid visualization rendered successfully.');
+
+        const gridPlot = document.getElementById('grid-visual');
+        gridPlot.on('plotly_click', function(data) {
+            if (data.points.length > 0) {
+                const index = data.points[0].pointIndex;
+                console.log('Grid plane clicked:', index);
+                const responseText = responses[index] || 'Response not available';
+                updateChatWindow(responseText);
+                highlightGridPlane(index);
+                highlight3DPoint(index);
+            }
+        });
+
     }).catch(error => {
         console.error('Failed to render grid visualization:', error);
     });
 
-    const gridPlot = document.getElementById('grid-visual');
-    gridPlot.on('plotly_click', function(data) {
-        if (data.points.length > 0) {
-            const index = data.points[0].curveNumber;
-            console.log('Grid plane clicked:', index);
-            const responseText = responses[index] || 'Response not available';
-            updateChatWindow(responseText);
-            highlightGridPlane(index);
-            highlightTSNEPoint(index);
-        }
-    });
+    function highlight3DPoint(index) {
+        const update = {
+            marker: {
+                color: embeddings3D.map((_, i) => i === index ? 'blue' : 'orange')
+            }
+        };
+        Plotly.restyle('grid-visual', update);
+    }
 
     function highlightGridPlane(index) {
+        const gridPlot = document.getElementById('grid-visual');
         if (gridPlot && gridPlot.data && Array.isArray(gridPlot.data[index].z)) {
-            const highlightColor = 'blue';
-            const originalColor = null;
-
-            const updatedColors = gridPlot.data.map((d, i) => {
-                if (i === index) {
-                    return { surfacecolor: d.z.map(row => row.map(() => highlightColor)) };
-                } else {
-                    return { surfacecolor: originalColor };
-                }
-            });
-
-            Plotly.restyle('grid-visual', updatedColors).then(() => {
-                console.log(`Highlighting plane for response ${index + 1}`);
-            }).catch(error => {
-                console.error('Error highlighting grid plane:', error);
-            });
+            Plotly.restyle(gridPlot, 'surfacecolor', gridPlot.data.map((d, i) => {
+                return i === index ? d.z.map(row => row.map(() => 'blue')) : null;
+            }));
+            console.log(`Highlighting plane for response ${index + 1}`);
         } else {
             console.error('Invalid grid data or gridPlot object:', gridPlot);
         }
-    }
-
-    function highlightTSNEPoint(index) {
-        d3.select("#tsne-visual").selectAll("circle").classed("highlight", false);
-        d3.select("#tsne-visual").selectAll("circle").filter((d, i) => i === index).classed("highlight", true);
     }
 }

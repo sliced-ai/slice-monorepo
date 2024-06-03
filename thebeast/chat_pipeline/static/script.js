@@ -79,7 +79,6 @@ document.getElementById('chat-form').addEventListener('submit', function(event) 
         conversation.replaceChild(botMessage, loadingIndicator);
 
         console.log('Fetching TSNE data from path:', data.tsne_data_path);
-        console.log('Fetching Grid data from path:', data.grid_data_path);
 
         fetch(data.tsne_data_path)
             .then(response => {
@@ -94,29 +93,11 @@ document.getElementById('chat-form').addEventListener('submit', function(event) 
                     throw new Error('Invalid TSNE data received.');
                 }
                 createTSNEVisualization(tsneData.embeddings, data.responses);
+                createGridVisualization(tsneData.embeddings, data.responses);
             })
             .catch(error => {
                 console.error('Error fetching or processing TSNE data:', error);
                 alert('Failed to fetch or process TSNE data.');
-            });
-
-        fetch(data.grid_data_path)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(gridData => {
-                console.log('Received Grid data:', gridData);
-                if (!gridData.embeddings || !Array.isArray(gridData.embeddings) || gridData.embeddings.length === 0) {
-                    throw new Error('Invalid Grid data received.');
-                }
-                createGridVisualization(gridData.embeddings, data.responses);
-            })
-            .catch(error => {
-                console.error('Error fetching or processing Grid data:', error);
-                alert('Failed to fetch or process Grid data.');
             });
 
         conversation.scrollTop = conversation.scrollHeight;

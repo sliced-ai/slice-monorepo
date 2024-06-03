@@ -46,7 +46,7 @@ class AutoEncoderTrainer:
         padded_embeddings = pad_sequence(embeddings, batch_first=True, padding_value=0)
         return torch.narrow(padded_embeddings, 1, 0, target_length)
 
-    def train_autoencoder(self, all_embeddings, epochs=500):
+    def train_autoencoder(self, all_embeddings, epochs=5):
         padded_embeddings = self.pad_embeddings(all_embeddings, self.encoder_config['input_size']).to(self.device)
         self.model.train()
         for epoch in range(epochs):
