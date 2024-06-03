@@ -3,6 +3,7 @@ import openai
 import time
 import multiprocessing
 import random
+import uuid
 
 API_KEY = 'sk-proj-7MAfZbOm9lPY28pubTiRT3BlbkFJGgn73o5e6sVCjoTfoFAP'
 
@@ -11,27 +12,46 @@ class InferenceEngine:
         self.models_config = models_config
         self.client = OpenAI(api_key=API_KEY)
     
+    
     def generate_responses(self, input_text):
         def worker(model_config, n_responses, input_text, return_dict, index):
             responses = []
             for _ in range(n_responses):
                 while True:
                     try:
+                        # Generate a random configuration for the response
+                        max_tokens = random.choice(range(model_config.get('max_tokens_min', 100), model_config.get('max_tokens_max', 1000) + 1, 10))
+                        temperature = round(random.uniform(model_config.get('temperature_min', 0.7), model_config.get('temperature_max', 1.0)), 2)
+                        top_p = round(random.uniform(model_config.get('top_p_min', 0.9), model_config.get('top_p_max', 1.0)), 2)
+
+                        # API call
                         response = self.client.chat.completions.create(
                             model=model_config.get('name', "gpt-4o"),
                             messages=[
                                 {"role": "system", "content": "You are a helpful assistant."},
                                 {"role": "user", "content": input_text}
                             ],
-                            max_tokens=model_config.get('max_tokens', 1000),
-                            temperature=model_config.get('temperature', 0.7),
-                            top_p=model_config.get('top_p', 1.0),
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            top_p=top_p,
                             frequency_penalty=model_config.get('frequency_penalty', 0.0),
                             presence_penalty=model_config.get('presence_penalty', 0.0),
                             logprobs=True,
                             top_logprobs=5
                         )
-                        responses.append(response)
+
+                        # Add UUID and configuration details to the response
+                        response_data = {
+                            'uuid': str(uuid.uuid4()),  # Generate a unique identifier
+                            'response': response,
+                            'configuration': {
+                                'max_tokens': max_tokens,
+                                'temperature': temperature,
+                                'top_p': top_p,
+                                'model': model_config.get('name', "gpt-4o")
+                            }
+                        }
+                        responses.append(response_data)
                         break
                     except openai.RateLimitError as e:
                         wait_time = random.uniform(1, 300)  # Randomized wait time
@@ -82,38 +102,24 @@ class InferenceEngine:
         print(f"Total responses generated: {len(all_responses)}")
         return all_responses
 
-    def extract_chat_completion_data(self, response):
-        # Data structure to hold the results
-        data = {
-            "Response Content": "",
-            "Logprobs": [],
-            "Top Logprob Words": [],
-            "Top Logprob Values": []
-        }
-        # Assume the first choice for simplification; adapt as needed for multiple choices
-        if response.choices:
-            choice = response.choices[0]
-            data["Response Content"] = choice.message.content
-            
-            # Extract token logprob information
-            for token_logprob in choice.logprobs.content:
-                # Append the logprob of the current token to the list
-                data["Logprobs"].append(token_logprob.logprob)
-                
-                # For collecting top logprob words and their values
-                top_words = []
-                top_values = []
-                
-                # Extract top logprob details
-                for top_logprob in token_logprob.top_logprobs:
-                    top_words.append(top_logprob.token)
-                    top_values.append(top_logprob.logprob)
-                
-                # Append each token's top logprob words and values
-                data["Top Logprob Words"].append(top_words)
-                data["Top Logprob Values"].append(top_values)
+    def extract_chat_completion_data(self, responses):
+        response_data_list = []
+        for response_data in responses:
+            if response_data['response'].choices:
+                choice = response_data['response'].choices[0]
+                response_content = choice.message.content if hasattr(choice.message, 'content') else ""
+                response_data_list.append({
+                    "uuid": response_data['uuid'],
+                    "response_content": response_content,
+                    "configuration": response_data['configuration']
+                })
+        return response_data_list
+
+
+
+
     
-        return data
+
 
 # Testing the modified InferenceEngine
 if __name__ == "__main__":

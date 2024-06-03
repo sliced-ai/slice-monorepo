@@ -21,7 +21,7 @@ class ChatPipeline:
         os.makedirs(f"data/{self.experiment_name}", exist_ok=True)
     
     def run_step(self, input_text, models_config, embedding_models_config, encoder_config):
-        self.step += 1  # Increment step here
+        self.step += 1
         step = self.step
         self.inference_engine = InferenceEngine(models_config)
         self.embedding_system = EmbeddingSystem(api_key=self.api_key, embedding_models_config=embedding_models_config)
@@ -30,19 +30,18 @@ class ChatPipeline:
         step_data = {}
         response_texts = []
         
-        # Update status
         with open('/tmp/inference_status.txt', 'w') as f:
             f.write("Inferencing messages")
             
         raw_responses = self.inference_engine.generate_responses(input_text)
-        for index, response in enumerate(raw_responses):
-            data = self.inference_engine.extract_chat_completion_data(response)
-            response_texts.append(data["Response Content"])
-            
-        step_data['responses'] = response_texts
+        response_data_list = self.inference_engine.extract_chat_completion_data(raw_responses)
+        step_data = {
+            'raw_responses': raw_responses,
+            'uuid_responses': response_data_list
+        }
+
         self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'responses')
-        
-        # Update status
+
         with open('/tmp/inference_status.txt', 'w') as f:
             f.write("Embedding messages")
             
@@ -55,7 +54,6 @@ class ChatPipeline:
         max_length = encoder_config.get('input_size', 5000)
         padded_embeddings = torch.stack([torch.cat([t, torch.zeros(max_length - t.size(0))]) if t.size(0) < max_length else t[:max_length] for t in tensor_embeddings])
         
-        # Update status
         with open('/tmp/inference_status.txt', 'w') as f:
             f.write("Training autoencoder")
             
@@ -78,7 +76,7 @@ class ChatPipeline:
         self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'autoencoder')
         
         self.master_embeddings.append(combined_embedding)
-        self.history.append(step_data)  # Append step data to history
+        self.history.append(step_data)
         
         return random.choice(response_texts), tsne_fig_path, grid_fig_path, tsne_data_path, grid_data_path
 
@@ -87,22 +85,39 @@ class ChatPipeline:
         os.makedirs(step_folder, exist_ok=True)
     
         full_path = lambda filename: os.path.join(step_folder, filename)
-        
+                
         if sub_step == 'responses':
-            with open(full_path("responses.json"), 'w') as f:
-                json.dump(data['responses'], f, indent=4)
+                # Save the uuid_response_list as a JSON file
+                uuid_response_file = full_path("uuid_response_list.json")
+                with open(uuid_response_file, 'w') as f:
+                    json.dump(data['uuid_responses'], f, indent=4)
         
+                # Convert raw_responses to a serializable format
+                serializable_raw_responses = []
+                for response_data in data['raw_responses']:
+                    serializable_data = {
+                        'uuid': response_data['uuid'],
+                        'response': serialize_chat_completion(response_data['response']),
+                        'configuration': response_data['configuration']
+                    }
+                    serializable_raw_responses.append(serializable_data)
+        
+                # Save the raw_responses_list as a JSON file
+                raw_responses_file = full_path("raw_responses_list.json")
+                with open(raw_responses_file, 'w') as f:
+                    json.dump(serializable_raw_responses, f, indent=4)
+        
+
         if sub_step == 'embeddings':
             with open(full_path("embeddings.json"), 'w') as f:
                 json.dump(data['embeddings'], f, indent=4)
-        
+    
         if sub_step == 'autoencoder':
-        # Assuming files are saved directly to these paths from within their respective methods
             if 'tsne_fig_path' in data:
                 assert os.path.exists(data['tsne_fig_path']), "TSNE file not found at expected location"
             if 'grid_fig_path' in data:
                 assert os.path.exists(data['grid_fig_path']), "Grid visualization file not found at expected location"
-        
+    
         step_config = {
             'input_text': input_text,
             'models_config': models_config,
@@ -112,17 +127,41 @@ class ChatPipeline:
         with open(full_path("step_config.json"), 'w') as f:
             json.dump(step_config, f, indent=4)
 
-
     def save_master_embedding(self):
         master_file = f"data/{self.experiment_name}/master_embedding.txt"
         with open(master_file, 'w') as f:
             f.write("\n".join(map(str, self.master_embeddings)))
 
 
+def serialize_chat_completion(response):
+    return {
+        'id': response.id,
+        'object': response.object,
+        'created': response.created,
+        'model': response.model,
+        'usage': {
+            'prompt_tokens': response.usage.prompt_tokens,
+            'completion_tokens': response.usage.completion_tokens,
+            'total_tokens': response.usage.total_tokens,
+        },
+        'choices': [
+            {
+                'message': choice.message.content if hasattr(choice.message, 'content') else "",
+                'logprobs': {
+                    'tokens': [token_logprob.token for token_logprob in choice.logprobs.content],
+                    'logprobs': [token_logprob.logprob for token_logprob in choice.logprobs.content],
+                    'top_logprobs': [
+                        {top_logprob.token: top_logprob.logprob for top_logprob in token_logprob.top_logprobs}
+                        for token_logprob in choice.logprobs.content
+                    ]
+                } if hasattr(choice, 'logprobs') and choice.logprobs else None
+            } for choice in response.choices
+        ]
+    }
+
 def get_default_models_config():
     return [
-        {"name": "gpt-4o", "n": 1, "max_tokens": 150, "temperature": 0.7, "top_p": 0.9},
-        {"name": "gpt-4o", "n": 1, "max_tokens": 200, "temperature": 0.6, "top_p": 1.0}
+        {"name": "gpt-4o", "n": 1, "max_tokens_min": 150, "max_tokens_max": 200, "temperature_min": 0.6, "temperature_max": 0.8, "top_p_min": 0.9, "top_p_max": 1.0}
     ]
 
 def get_default_embedding_models_config():
@@ -180,9 +219,12 @@ def chat():
         models_config = [{
             'name': request.form.get('model_name', 'gpt-4o'),
             'n': int(request.form.get('num_inferences', 1)),
-            'max_tokens': int(request.form.get('max_tokens', 150)),
-            'temperature': float(request.form.get('temperature', 0.7)),
-            'top_p': float(request.form.get('top_p', 0.9))
+            'max_tokens_min': int(request.form.get('max_tokens_min', 50)),
+            'max_tokens_max': int(request.form.get('max_tokens_max', 150)),
+            'temperature_min': float(request.form.get('temperature_min', 0.5)),
+            'temperature_max': float(request.form.get('temperature_max', 1.0)),
+            'top_p_min': float(request.form.get('top_p_min', 0.5)),
+            'top_p_max': float(request.form.get('top_p_max', 0.9))
         }]
         embedding_models_config = [{
             'name': request.form.get('embed_model_name', 'default_model'),
@@ -210,7 +252,7 @@ def chat():
         'grid_data_path': grid_data_path,
         'tsne_data_path': tsne_data_path,
         'tsne_fig_path': tsne_fig_path,
-        'responses': chat_pipeline.history[-1]['responses']  # Pass the actual responses
+        'responses': chat_pipeline.history[-1]['responses']
     }
     return jsonify(data)
 
@@ -243,8 +285,6 @@ def project_data(project_name):
                     step_info['step_config'] = json.load(f)
             project_data['steps'].append(step_info)
     return jsonify(project_data)
-
-
 
 @app.route('/status', methods=['GET'])
 def status():

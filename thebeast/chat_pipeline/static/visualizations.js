@@ -99,7 +99,6 @@ function createGridVisualization(embeddings, responses) {
                 console.log('Grid plane clicked:', index);
                 const responseText = responses[index] || 'Response not available';
                 updateChatWindow(responseText);
-                highlightGridPlane(index);
                 highlight3DPoint(index);
             }
         });
@@ -117,15 +116,4 @@ function createGridVisualization(embeddings, responses) {
         Plotly.restyle('grid-visual', update);
     }
 
-    function highlightGridPlane(index) {
-        const gridPlot = document.getElementById('grid-visual');
-        if (gridPlot && gridPlot.data && Array.isArray(gridPlot.data[index].z)) {
-            Plotly.restyle(gridPlot, 'surfacecolor', gridPlot.data.map((d, i) => {
-                return i === index ? d.z.map(row => row.map(() => 'blue')) : null;
-            }));
-            console.log(`Highlighting plane for response ${index + 1}`);
-        } else {
-            console.error('Invalid grid data or gridPlot object:', gridPlot);
-        }
-    }
 }

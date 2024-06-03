@@ -39,40 +39,43 @@
                 <form id="experiment-form">
                     <label for="experiment_name">Experiment Name:</label>
                     <input type="text" id="experiment_name" name="experiment_name" placeholder="none">
-
+            
                     <button type="button" id="dark-mode-btn" class="btn">Dark Theme</button>
-
+            
                     <div id="custom-settings">
                         <h3>Model Configuration</h3>
                         <label for="model_name">Model Name:</label>
                         <input type="text" id="model_name" name="model_name" value="gpt-4o">
-
+            
                         <label for="num_inferences">Number of Inferences:</label>
                         <input type="number" id="num_inferences" name="num_inferences" value="2">
-
+            
                         <label for="max_tokens">Max Tokens:</label>
-                        <input type="number" id="max_tokens" name="max_tokens" value="150">
-
+                        <input type="number" id="max_tokens_min" name="max_tokens_min" placeholder="Min" value="50">
+                        <input type="number" id="max_tokens_max" name="max_tokens_max" placeholder="Max" value="150">
+            
                         <label for="temperature">Temperature:</label>
-                        <input type="number" step="0.1" id="temperature" name="temperature" value="0.7">
-
+                        <input type="number" step="0.1" id="temperature_min" name="temperature_min" placeholder="Min" value="0.5">
+                        <input type="number" step="0.1" id="temperature_max" name="temperature_max" placeholder="Max" value="1.0">
+            
                         <label for="top_p">Top P:</label>
-                        <input type="number" step="0.1" id="top_p" name="top_p" value="0.9">
-
+                        <input type="number" step="0.1" id="top_p_min" name="top_p_min" placeholder="Min" value="0.5">
+                        <input type="number" step="0.1" id="top_p_max" name="top_p_max" placeholder="Max" value="0.9">
+            
                         <h3>Embedding Model Configuration</h3>
                         <label for="embed_model_name">Embedding Model Name:</label>
                         <input type="text" id="embed_model_name" name="embed_model_name" value="default_model">
-
+            
                         <label for="embed_model">Embedding Model:</label>
                         <input type="text" id="embed_model" name="embed_model" value="text-embedding-3-large">
-
+            
                         <h3>Autoencoder Configuration</h3>
                         <label for="input_size">Input Size:</label>
                         <input type="number" id="input_size" name="input_size" value="1000">
-
+            
                         <label for="hidden_size">Hidden Size:</label>
                         <input type="number" id="hidden_size" name="hidden_size" value="512">
-
+            
                         <label for="learning_rate">Learning Rate:</label>
                         <input type="number" step="0.001" id="learning_rate" name="learning_rate" value="0.001">
                     </div>
