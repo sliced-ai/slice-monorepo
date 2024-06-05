@@ -28,7 +28,6 @@ class ChatPipeline:
         self.auto_encoder_trainer = AutoEncoderTrainer(encoder_config)
         
         step_data = {}
-        response_texts = []
         
         with open('/tmp/inference_status.txt', 'w') as f:
             f.write("Inferencing messages")
@@ -45,21 +44,24 @@ class ChatPipeline:
         with open('/tmp/inference_status.txt', 'w') as f:
             f.write("Embedding messages")
             
-        embeddings = self.embedding_system.create_embeddings(response_texts)
+        embeddings = self.embedding_system.create_embeddings(response_data_list)
         step_data['embeddings'] = embeddings
         self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'embeddings')
+
+        with open('/tmp/inference_status.txt', 'w') as f:
+            f.write("Training autoencoder")
         
         all_embeddings = [embed for model_embeds in embeddings.values() for embed in model_embeds]
         tensor_embeddings = [torch.tensor(embed, dtype=torch.float) for embed in all_embeddings]
         max_length = encoder_config.get('input_size', 5000)
         padded_embeddings = torch.stack([torch.cat([t, torch.zeros(max_length - t.size(0))]) if t.size(0) < max_length else t[:max_length] for t in tensor_embeddings])
-        
-        with open('/tmp/inference_status.txt', 'w') as f:
-            f.write("Training autoencoder")
             
         combined_embedding, autoencoder_encoded_embeddings, autoencoder_weights = self.auto_encoder_trainer.train_autoencoder(padded_embeddings)
         step_data['combined_embedding'] = combined_embedding
         step_data['autoencoder_weights'] = autoencoder_weights
+
+        with open('/tmp/inference_status.txt', 'w') as f:
+            f.write("Visualization")
         
         tsne_fig_path = f"data/{self.experiment_name}/step_{step}/embedding_visualization_tsne.png"
         grid_fig_path = f"data/{self.experiment_name}/step_{step}/embedding_visualization_3d.png"
@@ -82,9 +84,12 @@ class ChatPipeline:
 
     def save_intermediate_step_data(self, data, step, input_text, models_config, embedding_models_config, encoder_config, sub_step):
         step_folder = f"data/{self.experiment_name}/step_{step}"
+        embed_folder = f"{step_folder}/embeddings"
         os.makedirs(step_folder, exist_ok=True)
+        os.makedirs(embed_folder, exist_ok=True)
     
         full_path = lambda filename: os.path.join(step_folder, filename)
+        full_path_embed = lambda filename: os.path.join(embed_folder, filename)
                 
         if sub_step == 'responses':
                 # Save the uuid_response_list as a JSON file
@@ -108,9 +113,22 @@ class ChatPipeline:
                     json.dump(serializable_raw_responses, f, indent=4)
         
 
-        if sub_step == 'embeddings':
-            with open(full_path("embeddings.json"), 'w') as f:
-                json.dump(data['embeddings'], f, indent=4)
+        elif sub_step == 'embeddings':
+            embeddings_data = {}
+            for model_name, model_embeddings in data['embeddings'].items():
+                for uuid, embeds in model_embeddings.items():
+                    if uuid not in embeddings_data:
+                        embeddings_data[uuid] = {'uuid': uuid, 'embeddings': []}
+                    for embed in embeds:
+                        embeddings_data[uuid]['embeddings'].append({
+                            'embedding': embed,
+                            'model_name': model_name
+                        })
+            
+            for uuid, embed_data in embeddings_data.items():
+                embedding_file = full_path_embed(f"{uuid}.json")
+                with open(embedding_file, 'w') as f:
+                    json.dump(embed_data, f, indent=4)
     
         if sub_step == 'autoencoder':
             if 'tsne_fig_path' in data:
@@ -159,24 +177,6 @@ def serialize_chat_completion(response):
         ]
     }
 
-def get_default_models_config():
-    return [
-        {"name": "gpt-4o", "n": 1, "max_tokens_min": 150, "max_tokens_max": 200, "temperature_min": 0.6, "temperature_max": 0.8, "top_p_min": 0.9, "top_p_max": 1.0}
-    ]
-
-def get_default_embedding_models_config():
-    return [
-        {'name': 'default_model', 'model': 'text-embedding-3-large'},
-        {'name': 'small_model', 'model': 'text-embedding-3-small'}
-    ]
-
-def get_default_encoder_config():
-    return {
-        'input_size': 5000,
-        'hidden_size': 512,
-        'learning_rate': 0.001
-    }
-
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -203,38 +203,30 @@ def projects():
                 projects_data.append(project_info)
     return render_template('projects.html', projects=projects_data)
 
-
 @app.route('/chat', methods=['POST'])
 def chat():
     experiment_name = request.form.get('experiment_name')
     input_text = request.form.get('input_text')
     api_key = 'sk-proj-7MAfZbOm9lPY28pubTiRT3BlbkFJGgn73o5e6sVCjoTfoFAP'
-    use_default = 'use_default' in request.form
 
-    if use_default:
-        models_config = get_default_models_config()
-        embedding_models_config = get_default_embedding_models_config()
-        encoder_config = get_default_encoder_config()
-    else:
-        models_config = [{
-            'name': request.form.get('model_name', 'gpt-4o'),
-            'n': int(request.form.get('num_inferences', 1)),
-            'max_tokens_min': int(request.form.get('max_tokens_min', 50)),
-            'max_tokens_max': int(request.form.get('max_tokens_max', 150)),
-            'temperature_min': float(request.form.get('temperature_min', 0.5)),
-            'temperature_max': float(request.form.get('temperature_max', 1.0)),
-            'top_p_min': float(request.form.get('top_p_min', 0.5)),
-            'top_p_max': float(request.form.get('top_p_max', 0.9))
-        }]
-        embedding_models_config = [{
-            'name': request.form.get('embed_model_name', 'default_model'),
-            'model': request.form.get('embed_model', 'text-embedding-3-large')
-        }]
-        encoder_config = {
-            'input_size': int(request.form.get('input_size', 5000)),
-            'hidden_size': int(request.form.get('hidden_size', 512)),
-            'learning_rate': float(request.form.get('learning_rate', 0.001))
-        }
+    models_config = [{
+        'name': request.form.get('model_name', 'gpt-4o'),
+        'n': int(request.form.get('num_inferences', 1)),
+        'max_tokens_min': int(request.form.get('max_tokens_min', 50)),
+        'max_tokens_max': int(request.form.get('max_tokens_max', 150)),
+        'temperature_min': float(request.form.get('temperature_min', 0.5)),
+        'temperature_max': float(request.form.get('temperature_max', 1.0)),
+        'top_p_min': float(request.form.get('top_p_min', 0.5)),
+        'top_p_max': float(request.form.get('top_p_max', 0.9))
+    }]
+    embedding_models_config = [{
+        'model': request.form.get('embed_model_name', 'text-embedding-3-small,text-embedding-3-large')
+    }]
+    encoder_config = {
+        'input_size': int(request.form.get('input_size', 5000)),
+        'hidden_size': int(request.form.get('hidden_size', 512)),
+        'learning_rate': float(request.form.get('learning_rate', 0.001))
+    }
 
     if experiment_name not in pipelines:
         pipelines[experiment_name] = ChatPipeline(experiment_name, api_key)

@@ -61,7 +61,6 @@ class AutoEncoderTrainer:
         return combined_embedding.detach().cpu().numpy(), encoded.detach().cpu().numpy(), self.model.state_dict()
 
 
-
     def visualize_embeddings_tsne(self, embeddings, tsne_fig_path, json_path, title='2D Visualization of Embeddings'):
         n_neighbors = min(15, len(embeddings) - 1)  # Ensure n_neighbors is valid for the dataset size
         reducer = umap.UMAP(n_components=2, n_neighbors=n_neighbors, min_dist=0.1, random_state=42)
