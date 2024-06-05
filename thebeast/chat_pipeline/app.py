@@ -7,6 +7,8 @@ from embedding import EmbeddingSystem
 from auto_encoder import AutoEncoderTrainer
 import torch
 import random
+import umap.umap_ as umap
+import matplotlib.pyplot as plt
 
 app = Flask(__name__)
 pipelines = {}
@@ -25,7 +27,6 @@ class ChatPipeline:
         step = self.step
         self.inference_engine = InferenceEngine(models_config)
         self.embedding_system = EmbeddingSystem(api_key=self.api_key, embedding_models_config=embedding_models_config)
-        self.auto_encoder_trainer = AutoEncoderTrainer(encoder_config)
         
         step_data = {}
         
@@ -49,38 +50,33 @@ class ChatPipeline:
         self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'embeddings')
 
         with open('/tmp/inference_status.txt', 'w') as f:
-            f.write("Training autoencoder")
-        
-        all_embeddings = [embed for model_embeds in embeddings.values() for embed in model_embeds]
-        tensor_embeddings = [torch.tensor(embed, dtype=torch.float) for embed in all_embeddings]
-        max_length = encoder_config.get('input_size', 5000)
-        padded_embeddings = torch.stack([torch.cat([t, torch.zeros(max_length - t.size(0))]) if t.size(0) < max_length else t[:max_length] for t in tensor_embeddings])
-            
-        combined_embedding, autoencoder_encoded_embeddings, autoencoder_weights = self.auto_encoder_trainer.train_autoencoder(padded_embeddings)
-        step_data['combined_embedding'] = combined_embedding
-        step_data['autoencoder_weights'] = autoencoder_weights
-
-        with open('/tmp/inference_status.txt', 'w') as f:
             f.write("Visualization")
         
-        tsne_fig_path = f"data/{self.experiment_name}/step_{step}/embedding_visualization_tsne.png"
-        grid_fig_path = f"data/{self.experiment_name}/step_{step}/embedding_visualization_3d.png"
-        tsne_data_path = f"data/{self.experiment_name}/step_{step}/tsne_data.json"
-        grid_data_path = f"data/{self.experiment_name}/step_{step}/grid_data.json"
+        umap_fig_path = f"data/{self.experiment_name}/step_{step}/embedding_visualization_umap.png"
+        umap_data_path = f"data/{self.experiment_name}/step_{step}/umap_data.json"
         
-        self.auto_encoder_trainer.visualize_embeddings_tsne(autoencoder_encoded_embeddings, tsne_fig_path, tsne_data_path)
-        self.auto_encoder_trainer.visualize_2d_grid(autoencoder_encoded_embeddings, grid_fig_path, grid_data_path)
+        # Use "text-embedding-3-large" embeddings for UMAP visualization
+        large_embeddings = []
+        for uuid, model_embeddings in embeddings.get('text-embedding-3-large', {}).items():
+            large_embeddings.extend(model_embeddings)
+
+        tensor_embeddings = [torch.tensor(embed, dtype=torch.float) for embed in large_embeddings]
+        combined_embeddings = torch.stack(tensor_embeddings)
+
+        self.visualize_embeddings_umap(combined_embeddings, umap_fig_path, umap_data_path)
         
-        step_data['tsne_fig_path'] = tsne_fig_path
-        step_data['grid_fig_path'] = grid_fig_path
-        step_data['grid_data_path'] = grid_data_path
+        step_data['umap_fig_path'] = umap_fig_path
         
-        self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'autoencoder')
+        self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'umap')
         
-        self.master_embeddings.append(combined_embedding)
+        self.master_embeddings.append(combined_embeddings)
         self.history.append(step_data)
         
-        return random.choice(response_texts), tsne_fig_path, grid_fig_path, tsne_data_path, grid_data_path
+        # Select a random response text to return
+        chosen_response = random.choice(response_data_list)['response_content']
+        
+        return chosen_response, umap_fig_path, umap_data_path
+
 
     def save_intermediate_step_data(self, data, step, input_text, models_config, embedding_models_config, encoder_config, sub_step):
         step_folder = f"data/{self.experiment_name}/step_{step}"
@@ -92,27 +88,26 @@ class ChatPipeline:
         full_path_embed = lambda filename: os.path.join(embed_folder, filename)
                 
         if sub_step == 'responses':
-                # Save the uuid_response_list as a JSON file
-                uuid_response_file = full_path("uuid_response_list.json")
-                with open(uuid_response_file, 'w') as f:
-                    json.dump(data['uuid_responses'], f, indent=4)
-        
-                # Convert raw_responses to a serializable format
-                serializable_raw_responses = []
-                for response_data in data['raw_responses']:
-                    serializable_data = {
-                        'uuid': response_data['uuid'],
-                        'response': serialize_chat_completion(response_data['response']),
-                        'configuration': response_data['configuration']
-                    }
-                    serializable_raw_responses.append(serializable_data)
-        
-                # Save the raw_responses_list as a JSON file
-                raw_responses_file = full_path("raw_responses_list.json")
-                with open(raw_responses_file, 'w') as f:
-                    json.dump(serializable_raw_responses, f, indent=4)
-        
-
+            # Save the uuid_response_list as a JSON file
+            uuid_response_file = full_path("uuid_response_list.json")
+            with open(uuid_response_file, 'w') as f:
+                json.dump(data['uuid_responses'], f, indent=4)
+    
+            # Convert raw_responses to a serializable format
+            serializable_raw_responses = []
+            for response_data in data['raw_responses']:
+                serializable_data = {
+                    'uuid': response_data['uuid'],
+                    'response': serialize_chat_completion(response_data['response']),
+                    'configuration': response_data['configuration']
+                }
+                serializable_raw_responses.append(serializable_data)
+    
+            # Save the raw_responses_list as a JSON file
+            raw_responses_file = full_path("raw_responses_list.json")
+            with open(raw_responses_file, 'w') as f:
+                json.dump(serializable_raw_responses, f, indent=4)
+    
         elif sub_step == 'embeddings':
             embeddings_data = {}
             for model_name, model_embeddings in data['embeddings'].items():
@@ -130,11 +125,9 @@ class ChatPipeline:
                 with open(embedding_file, 'w') as f:
                     json.dump(embed_data, f, indent=4)
     
-        if sub_step == 'autoencoder':
-            if 'tsne_fig_path' in data:
-                assert os.path.exists(data['tsne_fig_path']), "TSNE file not found at expected location"
-            if 'grid_fig_path' in data:
-                assert os.path.exists(data['grid_fig_path']), "Grid visualization file not found at expected location"
+        elif sub_step == 'umap':
+            if 'umap_fig_path' in data:
+                assert os.path.exists(data['umap_fig_path']), "UMAP file not found at expected location"
     
         step_config = {
             'input_text': input_text,
@@ -145,10 +138,31 @@ class ChatPipeline:
         with open(full_path("step_config.json"), 'w') as f:
             json.dump(step_config, f, indent=4)
 
-    def save_master_embedding(self):
-        master_file = f"data/{self.experiment_name}/master_embedding.txt"
-        with open(master_file, 'w') as f:
-            f.write("\n".join(map(str, self.master_embeddings)))
+
+    def visualize_embeddings_umap(self, embeddings, umap_fig_path, json_path, title='2D Visualization of Embeddings'):
+        n_neighbors = max(2, min(15, len(embeddings) - 1))  # Ensure n_neighbors is at least 2
+        reducer = umap.UMAP(n_components=2, n_neighbors=n_neighbors, min_dist=0.1, random_state=42)
+        try:
+            umap_results = reducer.fit_transform(embeddings)
+        except ValueError as e:
+            print(f"UMAP error: {e}")
+            # Handle potential zero-size array error or disconnected vertices
+            umap_results = reducer.fit_transform(embeddings[:n_neighbors])  # Use a subset if necessary
+    
+        plt.figure(figsize=(10, 6))
+        plt.scatter(umap_results[:, 0], umap_results[:, 1], alpha=0.5)
+        plt.title(title)
+        plt.xlabel('Component 1')
+        plt.ylabel('Component 2')
+        plt.grid(True)
+        plt.savefig(umap_fig_path)
+        plt.close()
+    
+        # Save the UMAP results to a JSON file
+        umap_data = {'embeddings': umap_results.tolist()}
+        with open(json_path, 'w') as f:
+            json.dump(umap_data, f, indent=4)
+
 
 
 def serialize_chat_completion(response):
@@ -180,7 +194,7 @@ def serialize_chat_completion(response):
 @app.route('/')
 def index():
     return render_template('index.html')
-
+    
 @app.route('/projects')
 def projects():
     projects_data = []
@@ -194,14 +208,16 @@ def projects():
                     step_dir = os.path.join(experiment_dir, step)
                     if os.path.isdir(step_dir):
                         project_info['steps'] += 1
-                        responses_file = os.path.join(step_dir, 'responses.json')
-                        if os.path.exists(responses_file):
-                            with open(responses_file, 'r') as f:
+                        uuid_response_file = os.path.join(step_dir, 'uuid_response_list.json')
+                        if os.path.exists(uuid_response_file):
+                            with open(uuid_response_file, 'r') as f:
                                 responses = json.load(f)
-                                token_count = sum(len(response.split()) for response in responses)
+                                token_count = sum(len(response['response_content'].split()) for response in responses)
                                 project_info['token_estimate'] += token_count
                 projects_data.append(project_info)
     return render_template('projects.html', projects=projects_data)
+
+
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -235,16 +251,14 @@ def chat():
     if not input_text:
         return jsonify({"error": "No input text provided"}), 400
 
-    chosen_response, tsne_fig_path, grid_fig_path, tsne_data_path, grid_data_path = chat_pipeline.run_step(input_text, models_config, embedding_models_config, encoder_config)
+    chosen_response, umap_fig_path, umap_data_path = chat_pipeline.run_step(input_text, models_config, embedding_models_config, encoder_config)
     
     data = {
         'chosen_response': chosen_response,
-        'grid_fig_path': grid_fig_path,
         'message': 'Chat response generated!',
-        'grid_data_path': grid_data_path,
-        'tsne_data_path': tsne_data_path,
-        'tsne_fig_path': tsne_fig_path,
-        'responses': chat_pipeline.history[-1]['responses']
+        'umap_data_path': umap_data_path,
+        'umap_fig_path': umap_fig_path,
+        'responses': chat_pipeline.history[-1]['uuid_responses']
     }
     return jsonify(data)
 
@@ -255,23 +269,19 @@ def project_data(project_name):
         return jsonify({"error": "Project not found"}), 404
     
     project_data = {'name': project_name, 'steps': []}
-    for step in os.listdir(project_path):
+    for step in sorted(os.listdir(project_path)):
         step_path = os.path.join(project_path, step)
         if os.path.isdir(step_path):
             step_info = {'step': step}
-            responses_file = os.path.join(step_path, 'responses.json')
-            tsne_data_file = os.path.join(step_path, 'tsne_data.json')
-            grid_data_file = os.path.join(step_path, 'grid_data.json')
+            uuid_response_file = os.path.join(step_path, 'uuid_response_list.json')
+            umap_data_file = os.path.join(step_path, 'umap_data.json')
             step_config_file = os.path.join(step_path, 'step_config.json')
-            if os.path.exists(responses_file):
-                with open(responses_file, 'r') as f:
+            if os.path.exists(uuid_response_file):
+                with open(uuid_response_file, 'r') as f:
                     step_info['responses'] = json.load(f)
-            if os.path.exists(tsne_data_file):
-                with open(tsne_data_file, 'r') as f:
-                    step_info['tsne_data'] = json.load(f)
-            if os.path.exists(grid_data_file):
-                with open(grid_data_file, 'r') as f:
-                    step_info['grid_data'] = json.load(f)
+            if os.path.exists(umap_data_file):
+                with open(umap_data_file, 'r') as f:
+                    step_info['umap_data'] = json.load(f)
             if os.path.exists(step_config_file):
                 with open(step_config_file, 'r') as f:
                     step_info['step_config'] = json.load(f)

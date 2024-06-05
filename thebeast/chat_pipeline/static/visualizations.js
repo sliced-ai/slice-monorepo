@@ -1,4 +1,4 @@
-function createTSNEVisualization(embeddings, responses) {
+function createUMAPVisualization(embeddings, responses) {
     console.log('Creating UMAP visualization with embeddings:', embeddings, 'and responses:', responses);
     const svg = d3.select("#tsne-visual");
     svg.selectAll("*").remove();
@@ -37,30 +37,22 @@ function createTSNEVisualization(embeddings, responses) {
         .attr("r", 5)
         .style("fill", "orange")
         .on("click", function(event, d) {
-            const index = embeddings.indexOf(d);
-            console.log('UMAP point clicked:', d, 'index:', index, 'response:', responses[index]);
-            updateChatWindow(responses[index]);
-            highlightUMAPPoint(index);
-            highlightGridPlane(index);
+            const umapIndex = embeddings.indexOf(d);
+            const response = responses[umapIndex].response_content;
+            console.log(`UMAP point clicked: UMAP Index: ${umapIndex}, Response: ${response}`);
+            
+            // Update the chat window with the response from UMAP point
+            const chatWindowIndex = document.querySelector('.message.highlight')?.dataset.stepIndex;
+            if (chatWindowIndex !== undefined) {
+                updateChatWindow(response, chatWindowIndex);
+            } else {
+                console.warn('No chat window index selected to update');
+            }
         });
-
-    function highlightUMAPPoint(index) {
-        svg.selectAll("circle").classed("highlight", false);
-        svg.selectAll("circle").filter((d, i) => i === index).classed("highlight", true);
-    }
-
-    function highlightGridPlane(index) {
-        const gridPlot = document.getElementById('grid-visual');
-        if (gridPlot && gridPlot.data && Array.isArray(gridPlot.data[index].z)) {
-            Plotly.restyle(gridPlot, 'surfacecolor', gridPlot.data.map((d, i) => {
-                return i === index ? d.z.map(row => row.map(() => 'blue')) : null;
-            }));
-            console.log(`Highlighting plane for response ${index + 1}`);
-        } else {
-            console.error('Invalid grid data or gridPlot object:', gridPlot);
-        }
-    }
 }
+
+
+
 function createGridVisualization(embeddings, responses) {
     console.log('Creating 3D visualization with embeddings:', embeddings, 'and responses:', responses);
 
@@ -73,7 +65,7 @@ function createGridVisualization(embeddings, responses) {
         z: embeddings3D.map(d => d[2]),
         mode: 'markers',
         type: 'scatter3d',
-        text: responses,
+        text: responses.map(r => r.response_content),
         marker: {
             size: 5,
             color: 'orange'
@@ -96,9 +88,9 @@ function createGridVisualization(embeddings, responses) {
         gridPlot.on('plotly_click', function(data) {
             if (data.points.length > 0) {
                 const index = data.points[0].pointIndex;
-                console.log('Grid plane clicked:', index);
-                const responseText = responses[index] || 'Response not available';
-                updateChatWindow(responseText);
+                console.log(`Grid plane clicked at index: ${index}`);
+                const responseText = responses[index].response_content || 'Response not available';
+                updateChatWindow(responseText, index);
                 highlight3DPoint(index);
             }
         });
@@ -115,5 +107,5 @@ function createGridVisualization(embeddings, responses) {
         };
         Plotly.restyle('grid-visual', update);
     }
-
 }
+

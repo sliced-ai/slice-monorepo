@@ -48,11 +48,11 @@
                         <input type="text" id="model_name" name="model_name" value="gpt-3.5-turbo">
             
                         <label for="num_inferences">Number of Inferences:</label>
-                        <input type="number" id="num_inferences" name="num_inferences" value="2">
+                        <input type="number" id="num_inferences" name="num_inferences" value="10">
             
                         <label for="max_tokens">Max Tokens:</label>
-                        <input type="number" id="max_tokens_min" name="max_tokens_min" placeholder="Min" value="50">
-                        <input type="number" id="max_tokens_max" name="max_tokens_max" placeholder="Max" value="150">
+                        <input type="number" id="max_tokens_min" name="max_tokens_min" placeholder="Min" value="25">
+                        <input type="number" id="max_tokens_max" name="max_tokens_max" placeholder="Max" value="100">
             
                         <label for="temperature">Temperature:</label>
                         <input type="number" step="0.1" id="temperature_min" name="temperature_min" placeholder="Min" value="0.5">
@@ -63,7 +63,7 @@
                         <input type="number" step="0.1" id="top_p_max" name="top_p_max" placeholder="Max" value="0.9">
             
                         <h3>Embedding Models Configuration</h3>
-                        <label for="embed_models">Embedding Model Names (comma seperated):</label>
+                        <label for="embed_models">Embedding Model Names (comma separated):</label>
                         <input type="text" id="embed_model_name" name="embed_model_name" value="text-embedding-3-small,text-embedding-3-large">
 
                         <h3>Autoencoder Configuration</h3>
@@ -83,88 +83,5 @@
     </div>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
     <script src="{{ url_for('static', filename='visualizations.js') }}"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            const params = new URLSearchParams(window.location.search);
-            const projectName = params.get('project');
-            if (projectName) {
-                fetch(`/project_data/${projectName}`)
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.error) {
-                            alert(data.error);
-                        } else {
-                            populateChatWindow(data);
-                        }
-                    })
-                    .catch(error => console.error('Error fetching project data:', error));
-            }
-        });
-        function populateChatWindow(projectData) {
-            const conversation = document.getElementById('conversation');
-            conversation.innerHTML = '';  // Clear existing content
-        
-            projectData.steps.forEach((step, stepIndex) => {
-                // Insert user's input
-                const userInput = step.step_config.input_text;
-                const userMessage = document.createElement('div');
-                userMessage.className = 'message user';
-                userMessage.dataset.stepIndex = stepIndex;
-                userMessage.innerText = userInput;
-                conversation.appendChild(userMessage);
-        
-                // Insert a single randomly chosen response
-                const responses = step.responses;
-                const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-                const botMessage = document.createElement('div');
-                botMessage.className = 'message bot';
-                botMessage.dataset.stepIndex = stepIndex;
-                botMessage.innerText = randomResponse;
-                conversation.appendChild(botMessage);
-            });
-        
-            document.getElementById('displayed-experiment-name').innerText = projectData.name;
-        
-            // Use the latest step's data for initial visualizations
-            updateVisualizations(projectData.steps.length - 1, projectData);
-        
-            // Add click event listeners for messages
-            document.querySelectorAll('.message').forEach(message => {
-                message.addEventListener('click', function () {
-                    const stepIndex = parseInt(this.dataset.stepIndex);
-                    updateVisualizations(stepIndex, projectData);
-                    highlightMessage(stepIndex);
-                });
-            });
-        }
-        
-        function updateVisualizations(stepIndex, projectData) {
-            const step = projectData.steps[stepIndex];
-        
-            if (step.tsne_data && step.tsne_data.embeddings) {
-                createTSNEVisualization(step.tsne_data.embeddings, step.responses);
-            } else {
-                console.log('No TSNE data available for step', stepIndex);
-            }
-        
-            if (step.grid_data && step.grid_data.embeddings) {
-                createGridVisualization(step.tsne_data.embeddings, step.responses);
-            } else {
-                console.log('No Grid data available for step', stepIndex);
-            }
-        }
-        
-        function highlightMessage(stepIndex) {
-            document.querySelectorAll('.message').forEach(message => {
-                message.classList.remove('highlight');
-                if (parseInt(message.dataset.stepIndex) === stepIndex) {
-                    message.classList.add('highlight');
-                }
-            });
-        }
-
-
-
-    </script>
 </body>
 </html>

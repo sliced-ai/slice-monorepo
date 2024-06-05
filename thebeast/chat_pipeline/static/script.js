@@ -12,15 +12,33 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
-    // Add event listener for the Projects button
     document.getElementById('projects-button').addEventListener('click', function() {
         window.location.href = '/projects';
     });
+
+    const params = new URLSearchParams(window.location.search);
+    const projectName = params.get('project');
+    if (projectName) {
+        fetch(`/project_data/${projectName}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                } else {
+                    populateChatWindow(data);
+                }
+            })
+            .catch(error => console.error('Error fetching project data:', error));
+    }
 });
 
 document.getElementById('home-button').addEventListener('click', function() {
     window.location.href = '/';
 });
+
+function viewProject(projectName) {
+    window.location.href = '/?project=' + encodeURIComponent(projectName);
+}
 
 document.getElementById('chat-form').addEventListener('submit', function(event) {
     event.preventDefault();
@@ -36,14 +54,12 @@ document.getElementById('chat-form').addEventListener('submit', function(event) 
 
     console.log('Submitting chat form with data:', Object.fromEntries(formData.entries()));
 
-    // Show user message
     const conversation = document.getElementById('conversation');
     const userMessage = document.createElement('div');
     userMessage.className = 'message user';
     userMessage.innerText = inputText;
     conversation.appendChild(userMessage);
 
-    // Show loading indicator
     const loadingIndicator = document.createElement('div');
     loadingIndicator.className = 'message bot';
     loadingIndicator.id = 'loading-indicator';
@@ -53,9 +69,8 @@ document.getElementById('chat-form').addEventListener('submit', function(event) 
     document.getElementById('input_text').value = '';
     conversation.scrollTop = conversation.scrollHeight;
 
-    // Set a long timeout for the fetch request
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000000); // 100 minutes
+    const timeoutId = setTimeout(() => controller.abort(), 6000000);
 
     fetch('/chat', {
         method: 'POST',
@@ -64,7 +79,7 @@ document.getElementById('chat-form').addEventListener('submit', function(event) 
     })
     .then(response => response.json())
     .then(data => {
-        clearTimeout(timeoutId); // Clear the timeout
+        clearTimeout(timeoutId);
         console.log('Received chat response:', data);
         if (data.error) {
             alert(data.error);
@@ -74,42 +89,41 @@ document.getElementById('chat-form').addEventListener('submit', function(event) 
 
         const botMessage = document.createElement('div');
         botMessage.className = 'message bot';
-        botMessage.id = 'bot-message';  // Assign an ID for easy replacement
-        botMessage.innerText = data.chosen_response; // Display only the chosen response
+        botMessage.id = 'bot-message';
+        botMessage.innerText = data.chosen_response;
         conversation.replaceChild(botMessage, loadingIndicator);
 
-        console.log('Fetching TSNE data from path:', data.tsne_data_path);
+        console.log('Fetching UMAP data from path:', data.umap_data_path);
 
-        fetch(data.tsne_data_path)
+        fetch(data.umap_data_path)
             .then(response => {
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 return response.json();
             })
-            .then(tsneData => {
-                console.log('Received TSNE data:', tsneData);
-                if (!tsneData.embeddings || !Array.isArray(tsneData.embeddings) || tsneData.embeddings.length === 0) {
-                    throw new Error('Invalid TSNE data received.');
+            .then(umapData => {
+                console.log('Received UMAP data:', umapData);
+                if (!umapData.embeddings || !Array.isArray(umapData.embeddings) || umapData.embeddings.length === 0) {
+                    throw new Error('Invalid UMAP data received.');
                 }
-                createTSNEVisualization(tsneData.embeddings, data.responses);
-                createGridVisualization(tsneData.embeddings, data.responses);
+                createUMAPVisualization(umapData.embeddings, data.responses, data.responses.map((_, index) => index));
+                createGridVisualization(umapData.embeddings, data.responses);
             })
             .catch(error => {
-                console.error('Error fetching or processing TSNE data:', error);
-                alert('Failed to fetch or process TSNE data.');
+                console.error('Error fetching or processing UMAP data:', error);
+                alert('Failed to fetch or process UMAP data.');
             });
 
         conversation.scrollTop = conversation.scrollHeight;
     })
     .catch(error => {
-        clearTimeout(timeoutId); // Clear the timeout
+        clearTimeout(timeoutId);
         console.error('Error sending chat message:', error);
         alert('Failed to send message.');
         conversation.removeChild(loadingIndicator);
     });
 
-    // Periodically fetch and display the status
     const statusInterval = setInterval(() => {
         fetch('/status')
             .then(response => response.json())
@@ -124,7 +138,6 @@ document.getElementById('chat-form').addEventListener('submit', function(event) 
     }, 5000);
 });
 
-// Function to toggle between views
 document.getElementById('toggle-view').addEventListener('click', function() {
     const visualizationContainer = document.getElementById('visualization-container');
     const formContainer = document.getElementById('form-container');
@@ -140,7 +153,6 @@ document.getElementById('toggle-view').addEventListener('click', function() {
     }
 });
 
-// Handle dark mode button
 document.getElementById('dark-mode-btn').addEventListener('click', function() {
     if (document.body.classList.contains('dark-mode')) {
         document.body.classList.add('light-mode');
@@ -162,71 +174,96 @@ document.getElementById('dark-mode-btn').addEventListener('click', function() {
     });
 });
 
-// Update displayed experiment name when the form input changes
 document.getElementById('experiment_name').addEventListener('input', function() {
     const experimentName = this.value.trim() || 'none';
     document.getElementById('displayed-experiment-name').innerText = experimentName;
 });
 
-// Update chat window with new responses
-function updateChatWindow(responseText) {
+function updateChatWindow(responseText, stepIndex) {
+    console.log('Updating chat window: Chat Window Index:', stepIndex, 'with response:', responseText);
     const conversation = document.getElementById('conversation');
-    const lastBotMessage = Array.from(conversation.getElementsByClassName('message bot')).pop();
-    if (lastBotMessage) {
-        lastBotMessage.innerText = responseText || 'Response not available';
+    const targetBotMessage = conversation.querySelector(`.message.bot[data-step-index="${stepIndex}"]`);
+    console.log('Found targetBotMessage for stepIndex:', stepIndex, targetBotMessage);
+
+    if (targetBotMessage) {
+        console.log(`Updating existing bot message for stepIndex: ${stepIndex}`);
+        targetBotMessage.innerText = responseText || 'Response not available';
     } else {
+        console.log(`Creating new bot message for stepIndex: ${stepIndex}`);
         const newBotMessage = document.createElement('div');
         newBotMessage.className = 'message bot';
-        newBotMessage.id = 'bot-message';
+        newBotMessage.dataset.stepIndex = stepIndex;
         newBotMessage.innerText = responseText || 'Response not available';
         conversation.appendChild(newBotMessage);
         conversation.scrollTop = conversation.scrollHeight;
     }
 }
 
-    function populateChatWindow(projectData) {
-        const conversation = document.getElementById('conversation');
-        conversation.innerHTML = '';  // Clear existing content
 
-        projectData.steps.forEach((step, stepIndex) => {
-            // Insert user's input
-            const userInput = step.step_config.input_text;
-            const userMessage = document.createElement('div');
-            userMessage.className = 'message user';
-            userMessage.dataset.stepIndex = stepIndex;
-            userMessage.innerText = userInput;
-            conversation.appendChild(userMessage);
+function populateChatWindow(projectData) {
+    console.log('Populating chat window with projectData:', projectData);
+    const conversation = document.getElementById('conversation');
+    conversation.innerHTML = '';  // Clear existing content
 
-            // Insert a single randomly chosen response
-            const responses = step.responses;
-            const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-            const botMessage = document.createElement('div');
-            botMessage.className = 'message bot';
-            botMessage.dataset.stepIndex = stepIndex;
-            botMessage.innerText = randomResponse;
-            conversation.appendChild(botMessage);
-        });
+    projectData.steps.forEach((step, stepIndex) => {
+        console.log(`Processing stepIndex: ${stepIndex}`);
 
-        document.getElementById('displayed-experiment-name').innerText = projectData.name;
+        const userInput = step.step_config.input_text;
+        const userMessage = document.createElement('div');
+        userMessage.className = 'message user';
+        userMessage.dataset.stepIndex = stepIndex;
+        userMessage.innerText = userInput;
+        conversation.appendChild(userMessage);
 
-        // Use the latest step's data for initial visualizations
-        updateVisualizations(projectData.steps.length - 1, projectData);
+        const responses = step.responses;
+        const randomResponse = responses[Math.floor(Math.random() * responses.length)].response_content;
+        const botMessage = document.createElement('div');
+        botMessage.className = 'message bot';
+        botMessage.dataset.stepIndex = stepIndex;
+        botMessage.innerText = randomResponse;
+        conversation.appendChild(botMessage);
 
-        // Add click event listeners for messages
-        document.querySelectorAll('.message').forEach(message => {
-            message.addEventListener('click', function () {
-                const stepIndex = parseInt(this.dataset.stepIndex);
-                updateVisualizations(stepIndex, projectData);
-                highlightMessage(stepIndex);
-            });
-        });
+        console.log(`Added chat pair for stepIndex: ${stepIndex}`);
+    });
+
+    document.getElementById('displayed-experiment-name').innerText = projectData.name;
+
+    // Automatically highlight the first chat response
+    if (projectData.steps.length > 0) {
+        const firstStepIndex = 0;
+        highlightMessage(firstStepIndex);
+        updateVisualizations(firstStepIndex, projectData);
     }
 
-    function highlightMessage(stepIndex) {
-        document.querySelectorAll('.message').forEach(message => {
-            message.classList.remove('highlight');
-            if (parseInt(message.dataset.stepIndex) === stepIndex) {
-                message.classList.add('highlight');
-            }
+    // Add click event listeners for messages
+    document.querySelectorAll('.message').forEach(message => {
+        message.addEventListener('click', function () {
+            const stepIndex = parseInt(this.dataset.stepIndex);
+            console.log(`Message clicked for stepIndex: ${stepIndex}`);
+            updateVisualizations(stepIndex, projectData);
+            highlightMessage(stepIndex);
         });
+    });
+}
+
+function highlightMessage(stepIndex) {
+    console.log(`Highlighting message for stepIndex: ${stepIndex}`);
+    document.querySelectorAll('.message').forEach(message => {
+        message.classList.remove('highlight');
+        if (parseInt(message.dataset.stepIndex) === stepIndex) {
+            message.classList.add('highlight');
+        }
+    });
+}
+
+
+
+function updateVisualizations(stepIndex, projectData) {
+    console.log(`Updating visualizations for stepIndex: ${stepIndex}`);
+    const step = projectData.steps[stepIndex];
+    if (step && step.umap_data) {
+        createUMAPVisualization(step.umap_data.embeddings, step.responses);
+        createGridVisualization(step.umap_data.embeddings, step.responses);
     }
+}
+
