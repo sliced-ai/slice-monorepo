@@ -180,16 +180,16 @@ document.getElementById('experiment_name').addEventListener('input', function() 
 });
 
 function updateChatWindow(responseText, stepIndex) {
-    console.log('Updating chat window: Chat Window Index:', stepIndex, 'with response:', responseText);
+    console.log('Updating chat window for stepIndex:', stepIndex, 'with response:', responseText);
     const conversation = document.getElementById('conversation');
     const targetBotMessage = conversation.querySelector(`.message.bot[data-step-index="${stepIndex}"]`);
     console.log('Found targetBotMessage for stepIndex:', stepIndex, targetBotMessage);
 
     if (targetBotMessage) {
-        console.log(`Updating existing bot message for stepIndex: ${stepIndex}`);
+        console.log('Updating existing bot message for stepIndex:', stepIndex);
         targetBotMessage.innerText = responseText || 'Response not available';
     } else {
-        console.log(`Creating new bot message for stepIndex: ${stepIndex}`);
+        console.log('Creating new bot message for stepIndex:', stepIndex);
         const newBotMessage = document.createElement('div');
         newBotMessage.className = 'message bot';
         newBotMessage.dataset.stepIndex = stepIndex;
@@ -199,15 +199,15 @@ function updateChatWindow(responseText, stepIndex) {
     }
 }
 
-
 function populateChatWindow(projectData) {
     console.log('Populating chat window with projectData:', projectData);
     const conversation = document.getElementById('conversation');
     conversation.innerHTML = '';  // Clear existing content
 
     projectData.steps.forEach((step, stepIndex) => {
-        console.log(`Processing stepIndex: ${stepIndex}`);
+        console.log('Processing stepIndex:', stepIndex);
 
+        // Insert user's input
         const userInput = step.step_config.input_text;
         const userMessage = document.createElement('div');
         userMessage.className = 'message user';
@@ -215,6 +215,7 @@ function populateChatWindow(projectData) {
         userMessage.innerText = userInput;
         conversation.appendChild(userMessage);
 
+        // Insert a single randomly chosen response
         const responses = step.responses;
         const randomResponse = responses[Math.floor(Math.random() * responses.length)].response_content;
         const botMessage = document.createElement('div');
@@ -223,28 +224,31 @@ function populateChatWindow(projectData) {
         botMessage.innerText = randomResponse;
         conversation.appendChild(botMessage);
 
-        console.log(`Added chat pair for stepIndex: ${stepIndex}`);
+        console.log('Added userMessage and botMessage for stepIndex:', stepIndex);
     });
 
     document.getElementById('displayed-experiment-name').innerText = projectData.name;
 
-    // Automatically highlight the first chat response
-    if (projectData.steps.length > 0) {
-        const firstStepIndex = 0;
-        highlightMessage(firstStepIndex);
-        updateVisualizations(firstStepIndex, projectData);
-    }
+    // Use the latest step's data for initial visualizations
+    initializeVisualizations(projectData.steps[0].umap_data.embeddings, projectData.steps[0].responses);
 
+    if (projectData.steps.length > 0) {
+        const lastStepIndex = projectData.steps.length - 1;
+        highlightMessage(lastStepIndex);
+        updateVisualizations(lastStepIndex, projectData);
+    }
+    
     // Add click event listeners for messages
     document.querySelectorAll('.message').forEach(message => {
         message.addEventListener('click', function () {
             const stepIndex = parseInt(this.dataset.stepIndex);
-            console.log(`Message clicked for stepIndex: ${stepIndex}`);
+            console.log('Message clicked for stepIndex:', stepIndex);
             updateVisualizations(stepIndex, projectData);
             highlightMessage(stepIndex);
         });
     });
 }
+
 
 function highlightMessage(stepIndex) {
     console.log(`Highlighting message for stepIndex: ${stepIndex}`);
@@ -259,11 +263,13 @@ function highlightMessage(stepIndex) {
 
 
 function updateVisualizations(stepIndex, projectData) {
-    console.log(`Updating visualizations for stepIndex: ${stepIndex}`);
     const step = projectData.steps[stepIndex];
     if (step && step.umap_data) {
-        createUMAPVisualization(step.umap_data.embeddings, step.responses);
-        createGridVisualization(step.umap_data.embeddings, step.responses);
+        const embeddings = step.umap_data.embeddings;
+        const responses = step.responses;
+        const temperatures = responses.map(response => response.configuration.temperature);
+        createUMAPVisualization(embeddings, responses);
+        createGridVisualization(embeddings, responses, temperatures);
     }
 }
 

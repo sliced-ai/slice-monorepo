@@ -22,7 +22,7 @@ class ChatPipeline:
         self.step = 0
         os.makedirs(f"data/{self.experiment_name}", exist_ok=True)
     
-    def run_step(self, input_text, models_config, embedding_models_config, encoder_config):
+    def run_step(self, input_text, models_config, embedding_models_config):
         self.step += 1
         step = self.step
         self.inference_engine = InferenceEngine(models_config)
@@ -40,14 +40,14 @@ class ChatPipeline:
             'uuid_responses': response_data_list
         }
 
-        self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'responses')
+        self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, 'responses')
 
         with open('/tmp/inference_status.txt', 'w') as f:
             f.write("Embedding messages")
             
         embeddings = self.embedding_system.create_embeddings(response_data_list)
         step_data['embeddings'] = embeddings
-        self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'embeddings')
+        self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, 'embeddings')
 
         with open('/tmp/inference_status.txt', 'w') as f:
             f.write("Visualization")
@@ -67,7 +67,7 @@ class ChatPipeline:
         
         step_data['umap_fig_path'] = umap_fig_path
         
-        self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, encoder_config, 'umap')
+        self.save_intermediate_step_data(step_data, step, input_text, models_config, embedding_models_config, 'umap')
         
         self.master_embeddings.append(combined_embeddings)
         self.history.append(step_data)
@@ -78,7 +78,7 @@ class ChatPipeline:
         return chosen_response, umap_fig_path, umap_data_path
 
 
-    def save_intermediate_step_data(self, data, step, input_text, models_config, embedding_models_config, encoder_config, sub_step):
+    def save_intermediate_step_data(self, data, step, input_text, models_config, embedding_models_config, sub_step):
         step_folder = f"data/{self.experiment_name}/step_{step}"
         embed_folder = f"{step_folder}/embeddings"
         os.makedirs(step_folder, exist_ok=True)
@@ -132,8 +132,7 @@ class ChatPipeline:
         step_config = {
             'input_text': input_text,
             'models_config': models_config,
-            'embedding_models_config': embedding_models_config,
-            'encoder_config': encoder_config
+            'embedding_models_config': embedding_models_config
         }
         with open(full_path("step_config.json"), 'w') as f:
             json.dump(step_config, f, indent=4)
@@ -238,11 +237,6 @@ def chat():
     embedding_models_config = [{
         'model': request.form.get('embed_model_name', 'text-embedding-3-small,text-embedding-3-large')
     }]
-    encoder_config = {
-        'input_size': int(request.form.get('input_size', 5000)),
-        'hidden_size': int(request.form.get('hidden_size', 512)),
-        'learning_rate': float(request.form.get('learning_rate', 0.001))
-    }
 
     if experiment_name not in pipelines:
         pipelines[experiment_name] = ChatPipeline(experiment_name, api_key)
@@ -251,7 +245,7 @@ def chat():
     if not input_text:
         return jsonify({"error": "No input text provided"}), 400
 
-    chosen_response, umap_fig_path, umap_data_path = chat_pipeline.run_step(input_text, models_config, embedding_models_config, encoder_config)
+    chosen_response, umap_fig_path, umap_data_path = chat_pipeline.run_step(input_text, models_config, embedding_models_config)
     
     data = {
         'chosen_response': chosen_response,

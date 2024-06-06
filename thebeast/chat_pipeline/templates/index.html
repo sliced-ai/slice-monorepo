@@ -9,78 +9,84 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="light-mode">
-    <div class="navbar">
-        <button id="home-button" class="nav-btn">BigChat</button>
+    <header class="navbar">
+        <button id="home-button" class="nav-btn">
+            <i class="fas fa-home"></i> BigChat
+        </button>
         <div class="nav-center">
-            <button id="projects-button" class="nav-btn">Projects</button>
+            <button id="projects-button" class="nav-btn">
+                <i class="fas fa-folder-open"></i> Projects
+            </button>
         </div>
         <div class="nav-right">
             <button class="profile-btn">C</button>
         </div>
-    </div>
-    <div class="container">
-        <div class="left-side">
+    </header>
+    <main class="container">
+        <section class="left-side">
             <div id="conversation" class="conversation"></div>
             <form id="chat-form">
                 <input type="text" id="input_text" name="input_text" placeholder="Type your message here..." required>
                 <button type="submit" class="btn">Send</button>
             </form>
-        </div>
-        <div class="right-side">
+        </section>
+        <section class="right-side">
             <div id="experiment-name-display">Experiment Name: <span id="displayed-experiment-name">none</span></div>
             <div class="toggle-buttons">
                 <button id="toggle-view" class="btn">Show Visualizations</button>
             </div>
             <div id="visualization-container" class="content-container">
-                <svg id="tsne-visual" class="visualization" width="600" height="400"></svg>
-                <div id="grid-visual" class="visualization" width="800" height="600"></div>
+                <div class="dropdown">
+                    <label for="z-axis-select">Select Z-Axis:</label>
+                    <select id="z-axis-select">
+                        <option value="temperature">Temperature</option>
+                        <option value="top_p">Top P</option>
+                        <option value="max_tokens">Max Tokens</option>
+                    </select>
+                </div>
+                <svg id="tsne-visual" class="visualization" width="100%" height="50vh"></svg>
+                <div id="grid-visual" class="visualization" style="width: 100%; height: 50vh;"></div>
             </div>
             <div id="form-container" class="content-container active">
                 <form id="experiment-form">
-                    <label for="experiment_name">Experiment Name:</label>
-                    <input type="text" id="experiment_name" name="experiment_name" placeholder="test" value="test">
-            
-                    <button type="button" id="dark-mode-btn" class="btn">Dark Theme</button>
-            
-                    <div id="custom-settings">
-                        <h3>Model Configuration</h3>
+                    <fieldset>
+                        <legend>Experiment Settings</legend>
+                        <label for="experiment_name">Experiment Name:</label>
+                        <input type="text" id="experiment_name" name="experiment_name" placeholder="test" value="test">
+                
+                        <button type="button" id="dark-mode-btn" class="btn">Dark Theme</button>
+                    </fieldset>
+                    <fieldset id="custom-settings">
+                        <legend>Model Configuration</legend>
                         <label for="model_name">Model Name:</label>
                         <input type="text" id="model_name" name="model_name" value="gpt-3.5-turbo">
-            
+                
                         <label for="num_inferences">Number of Inferences:</label>
                         <input type="number" id="num_inferences" name="num_inferences" value="10">
-            
+                
                         <label for="max_tokens">Max Tokens:</label>
                         <input type="number" id="max_tokens_min" name="max_tokens_min" placeholder="Min" value="25">
                         <input type="number" id="max_tokens_max" name="max_tokens_max" placeholder="Max" value="100">
-            
+                
                         <label for="temperature">Temperature:</label>
                         <input type="number" step="0.1" id="temperature_min" name="temperature_min" placeholder="Min" value="0.5">
                         <input type="number" step="0.1" id="temperature_max" name="temperature_max" placeholder="Max" value="1.0">
-            
+                
                         <label for="top_p">Top P:</label>
                         <input type="number" step="0.1" id="top_p_min" name="top_p_min" placeholder="Min" value="0.5">
                         <input type="number" step="0.1" id="top_p_max" name="top_p_max" placeholder="Max" value="0.9">
-            
-                        <h3>Embedding Models Configuration</h3>
+                    </fieldset>
+                    <fieldset>
+                        <legend>Embedding Models Configuration</legend>
                         <label for="embed_models">Embedding Model Names (comma separated):</label>
                         <input type="text" id="embed_model_name" name="embed_model_name" value="text-embedding-3-small,text-embedding-3-large">
-
-                        <h3>Autoencoder Configuration</h3>
-                        <label for="input_size">Input Size:</label>
-                        <input type="number" id="input_size" name="input_size" value="1000">
-            
-                        <label for="hidden_size">Hidden Size:</label>
-                        <input type="number" id="hidden_size" name="hidden_size" value="512">
-            
-                        <label for="learning_rate">Learning Rate:</label>
-                        <input type="number" step="0.001" id="learning_rate" name="learning_rate" value="0.001">
-                    </div>
+                    </fieldset>
                 </form>
             </div>
             <div id="response"></div>
-        </div>
-    </div>
+        </section>
+    </main>
+    <script src="https://kit.fontawesome.com/a076d05399.js"></script> <!-- FontAwesome for icons -->
     <script src="{{ url_for('static', filename='script.js') }}"></script>
     <script src="{{ url_for('static', filename='visualizations.js') }}"></script>
 </body>

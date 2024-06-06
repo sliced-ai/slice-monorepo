@@ -1,21 +1,7 @@
-/* 
-    Style Guide Index:
-    1. General Styles
-    2. Light and Dark Modes
-    3. Navbar Styles
-    4. Container and Layout
-    5. Forms and Inputs
-    6. Buttons
-    7. Project Summary Styles
-    8. Visualization Styles
-    9. Conversation Styles
-    10. Toggle Buttons
-    11. Additional Styles
-*/
-
 /* 1. General Styles */
 body {
     font-family: 'Roboto', sans-serif;
+    font-size: 16px;
     margin: 0;
     padding: 0;
     transition: background-color 0.3s, color 0.3s;
@@ -23,7 +9,16 @@ body {
 
 h1, h2 {
     text-align: center;
-    color: #845c3d; /* Updated to darker brown */
+    color: #6b4f36; /* Darker brown for better contrast */
+    font-weight: bold; /* Bold headings for clear hierarchy */
+}
+
+h1 {
+    font-size: 2em; /* Larger font size for h1 */
+}
+
+h2 {
+    font-size: 1.75em; /* Slightly smaller than h1 but still prominent */
 }
 
 /* 2. Light and Dark Modes */
@@ -43,20 +38,29 @@ h1, h2 {
     justify-content: space-between;
     align-items: center;
     padding: 10px 20px;
-    background-color: #af7b51; /* Updated to lighter brown */
+    background-color: #8c6239; /* Updated to a slightly darker brown for better contrast */
+    height: 60px;
+    position: fixed;
+    width: 100%;
+    top: 0;
+    z-index: 1000;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Add shadow for depth */
 }
 
 .nav-btn {
     background: none;
     border: none;
-    color: white; /* Updated to white for better contrast */
+    color: white; /* Ensuring good contrast against the navbar */
     font-size: 18px;
     cursor: pointer;
     padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px; /* Space between icon and text */
 }
 
 .nav-btn:hover {
-    background-color: rgba(255, 255, 255, 0.1); /* Updated to match theme */
+    background-color: rgba(255, 255, 255, 0.1); /* Hover effect for better interactivity */
     border-radius: 4px;
 }
 
@@ -72,9 +76,9 @@ h1, h2 {
 
 .profile-btn {
     background: none;
-    border: 2px solid white; /* Updated to white */
+    border: 2px solid white; /* Ensuring good contrast */
     border-radius: 50%;
-    color: white; /* Updated to white */
+    color: white;
     font-size: 18px;
     cursor: pointer;
     padding: 10px;
@@ -86,7 +90,7 @@ h1, h2 {
 }
 
 .profile-btn:hover {
-    background-color: rgba(255, 255, 255, 0.1); /* Updated to match theme */
+    background-color: rgba(255, 255, 255, 0.1);
 }
 
 /* 4. Container and Layout */
@@ -99,6 +103,7 @@ h1, h2 {
     height: calc(100vh - 60px);
     overflow: hidden;
     padding: 20px;
+    padding-top: 80px; /* Adjusting for fixed navbar */
 }
 
 .left-side, .right-side {
@@ -110,12 +115,12 @@ h1, h2 {
 
 .left-side.light-mode {
     background-color: #f4f4f4;
-    border-right: 2px solid #af7b51; /* Updated to lighter brown */
+    border-right: 2px solid #8c6239; /* Updated to match navbar */
 }
 
 .left-side.dark-mode {
     background-color: #2c2c2c;
-    border-right: 2px solid #af7b51; /* Updated to lighter brown */
+    border-right: 2px solid #8c6239;
 }
 
 .right-side.light-mode {
@@ -124,6 +129,16 @@ h1, h2 {
 
 .right-side.dark-mode {
     background-color: #2c2c2c;
+}
+
+@media (max-width: 768px) {
+    .container {
+        flex-direction: column;
+    }
+    .left-side, .right-side {
+        width: 100%;
+        padding: 10px;
+    }
 }
 
 /* 5. Forms and Inputs */
@@ -148,7 +163,8 @@ form.dark-mode {
 label {
     display: block;
     margin-bottom: 8px;
-    color: #845c3d; /* Updated to darker brown */
+    color: #6b4f36; /* Darker brown */
+    font-weight: bold; /* Make labels bold for better readability */
 }
 
 input[type="text"],
@@ -160,6 +176,7 @@ input[type="number"] {
     border-radius: 4px;
     background: #555;
     color: #eaeaea;
+    font-size: 1em; /* Ensure input text is readable */
 }
 
 input[type="text"].light-mode,
@@ -173,7 +190,7 @@ input[type="number"].light-mode {
 button {
     display: inline-block;
     padding: 10px 20px;
-    background: #af7b51; /* Updated to lighter brown */
+    background: #8c6239; /* Updated to match navbar */
     color: #fff;
     border: none;
     border-radius: 4px;
@@ -183,7 +200,7 @@ button {
 }
 
 button:hover {
-    background: #af7b51; /* Same color as normal for consistency */
+    background: #6b4f36; /* Slightly darker on hover */
 }
 
 .view-btn {
@@ -240,7 +257,7 @@ button:hover {
     margin: 20px auto; /* Ensure some margin for spacing */
     text-align: center;
     width: 100%; /* Ensure consistent width for visualizations */
-    height: 50vh; /* Set a height to take up half of the container height */
+    height: 45vh; /* Set a height to take up a portion of the container height */
     box-sizing: border-box; /* Include padding and border in the element's total width and height */
 }
 
@@ -253,6 +270,10 @@ button:hover {
     overflow: hidden; /* Ensure no overflow */
 }
 
+#tsne-visual {
+    width: 100%;
+    height: 45vh; /* Ensure consistent height for 2D visualization */
+}
 
 .visualization.light-mode {
     background-color: #fff;
@@ -281,6 +302,7 @@ button:hover {
     align-self: flex-start;
     border: 1px solid #b3e5fc;
     color: #000;
+    font-size: 1em; /* Ensure readability */
 }
 
 .message.bot {
@@ -288,10 +310,11 @@ button:hover {
     align-self: flex-end;
     border: 1px solid #e0e0e0;
     color: #000;
+    font-size: 1em; /* Ensure readability */
 }
 
 .message.highlight {
-    border: 2px solid #af7b51;
+    border: 2px solid #8c6239;
     padding: 8px;
     border-radius: 5px;
 }
@@ -310,7 +333,7 @@ button:hover {
     margin-bottom: 10px;
     font-size: 18px;
     font-weight: bold;
-    color: #845c3d; /* Updated to darker brown */
+    color: #6b4f36; /* Updated to darker brown */
 }
 
 #dark-mode-btn {
