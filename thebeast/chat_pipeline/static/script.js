@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (data.error) {
                     alert(data.error);
                 } else {
+                    console.log('Project data fetched:', data);
                     populateChatWindow(data);
                 }
             })
@@ -57,12 +58,14 @@ document.getElementById('chat-form').addEventListener('submit', function(event) 
     const conversation = document.getElementById('conversation');
     const userMessage = document.createElement('div');
     userMessage.className = 'message user';
+    userMessage.dataset.stepIndex = conversation.children.length; // Set step index based on the current length
     userMessage.innerText = inputText;
     conversation.appendChild(userMessage);
 
     const loadingIndicator = document.createElement('div');
     loadingIndicator.className = 'message bot';
     loadingIndicator.id = 'loading-indicator';
+    loadingIndicator.dataset.stepIndex = conversation.children.length; // Set step index based on the current length
     loadingIndicator.innerText = 'Processing...';
     conversation.appendChild(loadingIndicator);
 
@@ -89,7 +92,7 @@ document.getElementById('chat-form').addEventListener('submit', function(event) 
 
         const botMessage = document.createElement('div');
         botMessage.className = 'message bot';
-        botMessage.id = 'bot-message';
+        botMessage.dataset.stepIndex = conversation.children.length - 1; // Set step index based on the current length
         botMessage.innerText = data.chosen_response;
         conversation.replaceChild(botMessage, loadingIndicator);
 
@@ -116,6 +119,12 @@ document.getElementById('chat-form').addEventListener('submit', function(event) 
             });
 
         conversation.scrollTop = conversation.scrollHeight;
+
+        // Highlight the latest message
+        highlightMessage(conversation.children.length - 1);
+
+        // Reattach click event listeners for all messages
+        attachClickEventListeners(conversation, data);
     })
     .catch(error => {
         clearTimeout(timeoutId);
@@ -202,6 +211,11 @@ function updateChatWindow(responseText, stepIndex) {
 function populateChatWindow(projectData) {
     console.log('Populating chat window with projectData:', projectData);
     const conversation = document.getElementById('conversation');
+    if (!conversation) {
+        console.error('Conversation element not found!');
+        return;
+    }
+    
     conversation.innerHTML = '';  // Clear existing content
 
     projectData.steps.forEach((step, stepIndex) => {
@@ -237,18 +251,37 @@ function populateChatWindow(projectData) {
         highlightMessage(lastStepIndex);
         updateVisualizations(lastStepIndex, projectData);
     }
-    
+
     // Add click event listeners for messages
-    document.querySelectorAll('.message').forEach(message => {
+    attachClickEventListeners(conversation, projectData);
+
+    // Debugging: check if event listeners are actually added
+    const messages = document.querySelectorAll('.message');
+    if (messages.length === 0) {
+        console.warn('No message elements found to attach click event listeners.');
+    } else {
+        console.log(`Attached click event listeners to ${messages.length} message elements.`);
+    }
+}
+
+function attachClickEventListeners(conversation, projectData) {
+    console.log('Attaching click event listeners to conversation messages.');
+    conversation.querySelectorAll('.message').forEach(message => {
+        console.log('Adding click event listener to message:', message);  // Debugging statement
         message.addEventListener('click', function () {
             const stepIndex = parseInt(this.dataset.stepIndex);
-            console.log('Message clicked for stepIndex:', stepIndex);
-            updateVisualizations(stepIndex, projectData);
-            highlightMessage(stepIndex);
+            console.log('Message clicked for stepIndex:', stepIndex);  // Debugging statement
+            console.log('Current projectData:', projectData);  // Debugging statement to ensure projectData is available
+
+            if (!isNaN(stepIndex) && projectData && projectData.steps && stepIndex < projectData.steps.length) {
+                updateVisualizations(stepIndex, projectData);
+                highlightMessage(stepIndex);
+            } else {
+                console.error('Invalid stepIndex or stepIndex out of range:', stepIndex);  // Debugging statement
+            }
         });
     });
 }
-
 
 function highlightMessage(stepIndex) {
     console.log(`Highlighting message for stepIndex: ${stepIndex}`);
@@ -260,16 +293,16 @@ function highlightMessage(stepIndex) {
     });
 }
 
-
-
 function updateVisualizations(stepIndex, projectData) {
+    console.log(`Updating visualizations for stepIndex: ${stepIndex}`);  // Debugging statement
     const step = projectData.steps[stepIndex];
     if (step && step.umap_data) {
         const embeddings = step.umap_data.embeddings;
         const responses = step.responses;
         const temperatures = responses.map(response => response.configuration.temperature);
         createUMAPVisualization(embeddings, responses);
-        createGridVisualization(embeddings, responses, temperatures);
+        createGridVisualization(embeddings, responses, 'temperature');
+    } else {
+        console.error('Step or UMAP data not found for stepIndex:', stepIndex);  // Debugging statement
     }
 }
-

@@ -27,7 +27,6 @@ function createUMAPVisualization(embeddings, responses) {
         .attr("text-anchor", "middle")
         .style("font-size", "20px")
         .style("text-decoration", "underline")
-        .text("UMAP Visualization");
 
     svg.selectAll("circle")
         .data(embeddings)
@@ -78,6 +77,12 @@ function createGridVisualization(embeddings, responses, zAxisParameter = 'temper
         return;
     }
 
+    // Ensure zAxisParameter is a valid string
+    if (typeof zAxisParameter !== 'string') {
+        console.error('Invalid zAxisParameter:', zAxisParameter);
+        zAxisParameter = 'temperature';  // Default to 'temperature' if invalid
+    }
+
     const zValues = responses.map(r => r.configuration[zAxisParameter]);
     const embeddings3D = embeddings.map((d, i) => [d[0], d[1], zValues[i]]);
 
@@ -92,9 +97,6 @@ function createGridVisualization(embeddings, responses, zAxisParameter = 'temper
             size: 5,
             color: zValues,
             colorscale: 'Viridis',
-            colorbar: {
-                title: zAxisParameter.charAt(0).toUpperCase() + zAxisParameter.slice(1)
-            }
         },
         hovertemplate: '<b>' + zAxisParameter.charAt(0).toUpperCase() + zAxisParameter.slice(1) + ':</b> %{z:.2f}<br>' +
                        '<b>UMAP 1:</b> %{x:.2f}<br>' +
@@ -103,7 +105,6 @@ function createGridVisualization(embeddings, responses, zAxisParameter = 'temper
     };
 
     const layout = {
-        title: '3D UMAP Visualization with ' + zAxisParameter.charAt(0).toUpperCase() + zAxisParameter.slice(1),
         scene: {
             xaxis: {title: 'UMAP 1'},
             yaxis: {title: 'UMAP 2'},
