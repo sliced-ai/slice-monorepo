@@ -5,7 +5,7 @@ SSH_DIR="$HOME/.ssh"
 SSH_KEY_NAME="runpod"
 SSH_PRIVATE_KEY_PATH="$SSH_DIR/$SSH_KEY_NAME"
 REPO_URL="git@github.com:sliced-ai/slice-monorepo.git"
-BRANCH="runpod"
+BRANCH="cl_pipeline_runpod"
 
 # Ensure the SSH directory exists with the correct permissions
 mkdir -p "$SSH_DIR"
