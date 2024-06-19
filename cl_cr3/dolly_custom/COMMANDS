@@ -5,10 +5,7 @@ pip install -r requirements_dev.txt
 
 python train_dolly.py --input_model EleutherAI/pythia-2.8b --gpu_family a10
 
-python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a10
-
-
-
+python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a100
 
 
 pip install tensorboard

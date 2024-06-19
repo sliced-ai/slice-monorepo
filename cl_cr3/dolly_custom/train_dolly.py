@@ -71,7 +71,7 @@ def main():
     parser.add_argument("--input_model", type=str, default=DEFAULT_INPUT_MODEL, help="Input model name")
     parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs")
     parser.add_argument("--local_training_root", type=str, default="", help="Local training root directory")
-    parser.add_argument("--gpu_family", type=str, default="a100", choices=["v100", "a10", "a100"], help="GPU family")
+    parser.add_argument("--gpu_family", type=str, default="a100", choices=["v100", "a10", "a100","a6000"], help="GPU family")
     parser.add_argument("--training_dataset", type=str, default="databricks/databricks-dolly-15k", help="Path to the training data file")
     args = parser.parse_args()
 
