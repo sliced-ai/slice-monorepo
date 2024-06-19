@@ -8,7 +8,7 @@ import sys
 
 # Default and suggested input models
 DEFAULT_INPUT_MODEL = "EleutherAI/pythia-2.8b"
-SUGGESTED_INPUT_MODELS = ["EleutherAI/pythia-2.8b", "EleutherAI/pythia-6.9b", "EleutherAI/pythia-12b"]
+SUGGESTED_INPUT_MODELS = ["EleutherAI/pythia-2.8b", "EleutherAI/pythia-6.9b", "EleutherAI/pythia-12b","databricks/dolly-v2-3b"]
 
 # Setup logging
 logging.basicConfig(
