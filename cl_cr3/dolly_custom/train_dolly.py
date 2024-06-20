@@ -1,14 +1,14 @@
 import logging
 import os
 import re
+import json
 from datetime import datetime
 import argparse
-import subprocess
-import sys
+from training.trainer import train
 
 # Default and suggested input models
 DEFAULT_INPUT_MODEL = "EleutherAI/pythia-2.8b"
-SUGGESTED_INPUT_MODELS = ["EleutherAI/pythia-2.8b", "EleutherAI/pythia-6.9b", "EleutherAI/pythia-12b","databricks/dolly-v2-3b"]
+SUGGESTED_INPUT_MODELS = ["EleutherAI/pythia-2.8b", "EleutherAI/pythia-6.9b", "EleutherAI/pythia-12b"]
 
 # Setup logging
 logging.basicConfig(
@@ -35,57 +35,62 @@ def prepare_directories(local_training_root, dolly_training_dir_name):
 
     return local_output_dir, tensorboard_display_dir
 
-# Define the function to run training
-def run_training(local_output_dir, deepspeed_config, input_model, training_dataset, batch_size, bf16):
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    
-    # Set PYTHONPATH to include the root directory of your project
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    sys.path.insert(0, project_root)
-    os.environ["PYTHONPATH"] = project_root
-
-    command = [
-        "deepspeed", "training/trainer.py", 
-        "--input-model", input_model,
-        "--deepspeed", deepspeed_config,
-        "--training-dataset", training_dataset,
-        "--epochs", "2",
-        "--local-output-dir", local_output_dir,
-        "--per-device-train-batch-size", str(batch_size),
-        "--per-device-eval-batch-size", str(batch_size),
-        "--logging-steps", "10",
-        "--save-steps", "200",
-        "--save-total-limit", "20",
-        "--eval-steps", "50",
-        "--warmup-steps", "50",
-        "--test-size", "200",
-        "--lr", "5e-6",
-        "--bf16", str(bf16).lower()
-    ]
-
-    subprocess.run(command, check=True)
-
 # Main function
 def main():
     parser = argparse.ArgumentParser(description="Train Dolly v2 Model")
     parser.add_argument("--input_model", type=str, default=DEFAULT_INPUT_MODEL, help="Input model name")
     parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs")
     parser.add_argument("--local_training_root", type=str, default="", help="Local training root directory")
-    parser.add_argument("--gpu_family", type=str, default="a100", choices=["v100", "a10", "a100","a6000"], help="GPU family")
+    parser.add_argument("--gpu_family", type=str, default="a100", choices=["v100", "a10", "a100"], help="GPU family")
     parser.add_argument("--training_dataset", type=str, default="databricks/databricks-dolly-15k", help="Path to the training data file")
+    parser.add_argument("--deepspeed_config", type=str, default="config/a10_config.json", help="Path to deepspeed config file.")
     args = parser.parse_args()
 
     dolly_training_dir_name = "dolly_training"
     local_output_dir, tensorboard_display_dir = prepare_directories(args.local_training_root, dolly_training_dir_name)
     
-    config_file_name = f"{args.gpu_family}_config.json"
-    deepspeed_config = os.path.join(os.getcwd(), "config", config_file_name)
-    print(f"Deepspeed config file: {deepspeed_config}")
+    print(f"Deepspeed config file: {args.deepspeed_config}")
 
-    batch_size = 3 if args.gpu_family != "a100" else 6
-    bf16 = args.gpu_family != "v100"
+    # Load DeepSpeed config
+    with open(args.deepspeed_config) as f:
+        deepspeed_config = json.load(f)
 
-    run_training(local_output_dir, deepspeed_config, args.input_model, args.training_dataset, batch_size, bf16)
+    # Extract necessary configurations, ensuring defaults for "auto" values
+    epochs = deepspeed_config.get("num_train_epochs", 3)
+    train_batch_size = deepspeed_config.get("train_batch_size", 1)
+    train_micro_batch_size_per_gpu = deepspeed_config.get("train_micro_batch_size_per_gpu", 1)
+    lr = deepspeed_config.get("learning_rate", 1e-5)
+    seed = deepspeed_config.get("seed", 42)
+    logging_steps = deepspeed_config.get("logging_steps", 10)
+    save_steps = deepspeed_config.get("save_steps", 400)
+    eval_steps = deepspeed_config.get("eval_steps", 50)
+    test_size = deepspeed_config.get("test_size", 1000)
+    save_total_limit = deepspeed_config.get("save_total_limit", 10)
+    warmup_steps = deepspeed_config.get("warmup_steps", 0)
+    local_rank = deepspeed_config.get("local_rank", "0")
+    bf16 = deepspeed_config.get("bf16", {}).get("enabled", False)
+
+    train(
+        input_model=args.input_model,
+        local_output_dir=local_output_dir,
+        dbfs_output_dir=None,  # Set this if you need to save to DBFS
+        epochs=epochs,
+        per_device_train_batch_size=train_micro_batch_size_per_gpu,
+        per_device_eval_batch_size=train_micro_batch_size_per_gpu,
+        lr=lr,
+        seed=seed,
+        deepspeed=args.deepspeed_config,
+        gradient_checkpointing=True,
+        local_rank=local_rank,
+        bf16=bf16,
+        logging_steps=logging_steps,
+        save_steps=save_steps,
+        eval_steps=eval_steps,
+        test_size=test_size,
+        save_total_limit=save_total_limit,
+        warmup_steps=warmup_steps,
+        training_dataset=args.training_dataset,
+    )
 
 if __name__ == "__main__":
     main()

@@ -3,7 +3,6 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
 
-import click
 import numpy as np
 from datasets import Dataset, load_dataset
 from transformers import (
@@ -35,14 +34,13 @@ class DataCollatorForCompletionOnlyLM(DataCollatorForLanguageModeling):
     def torch_call(self, examples: List[Union[List[int], Any, Dict[str, Any]]]) -> Dict[str, Any]:
         batch = super().torch_call(examples)
 
-        # The prompt ends with the response key plus a newline.  We encode this and then try to find it in the
-        # sequence of tokens.  This should just be a single token.
+        # The prompt ends with the response key plus a newline. We encode this and then try to find it in the
+        # sequence of tokens. This should just be a single token.
         response_token_ids = self.tokenizer.encode(RESPONSE_KEY_NL)
 
         labels = batch["labels"].clone()
 
         for i in range(len(examples)):
-
             response_token_ids_start_idx = None
             for idx in np.where(batch["labels"][i] == response_token_ids[0])[0]:
                 response_token_ids_start_idx = idx
@@ -87,11 +85,6 @@ def load_training_dataset(path_or_dataset: str = DEFAULT_TRAINING_DATASET) -> Da
         if not response:
             raise ValueError(f"Expected a response in: {rec}")
 
-        # For some instructions there is an input that goes along with the instruction, providing context for the
-        # instruction.  For example, the input might be a passage from Wikipedia and the instruction says to extract
-        # some piece of information from it.  The response is that information to extract.  In other cases there is
-        # no input.  For example, the instruction might be open QA such as asking what year some historic figure was
-        # born.
         if context:
             rec["text"] = PROMPT_WITH_INPUT_FORMAT.format(instruction=instruction, response=response, input=context)
         else:
@@ -132,16 +125,6 @@ def get_model_tokenizer(
 
 
 def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int, seed=DEFAULT_SEED, training_dataset: str = DEFAULT_TRAINING_DATASET) -> Dataset:
-    """Loads the training dataset and tokenizes it so it is ready for training.
-
-    Args:
-        tokenizer (AutoTokenizer): Tokenizer tied to the model.
-        max_length (int): Maximum number of tokens to emit from tokenizer.
-
-    Returns:
-        Dataset: HuggingFace dataset
-    """
-
     dataset = load_training_dataset(training_dataset)
 
     logger.info("Preprocessing dataset")
@@ -152,7 +135,6 @@ def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int, seed=DEFAULT_S
         remove_columns=["instruction", "context", "response", "text", "category"],
     )
 
-    # Make sure we don't have any truncated records, as this would mean the end keyword is missing.
     logger.info("Processed dataset has %d rows", dataset.num_rows)
     dataset = dataset.filter(lambda rec: len(rec["input_ids"]) < max_length)
     logger.info("Processed dataset has %d rows after filtering for truncated records", dataset.num_rows)
@@ -166,7 +148,6 @@ def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int, seed=DEFAULT_S
 
 
 def train(
-    *,
     input_model: str,
     local_output_dir: str,
     dbfs_output_dir: str,
@@ -193,15 +174,12 @@ def train(
         pretrained_model_name_or_path=input_model, gradient_checkpointing=gradient_checkpointing
     )
 
-    # Use the same max length that the model supports.  Fall back to 1024 if the setting can't be found.
-    # The configuraton for the length can be stored under different names depending on the model.  Here we attempt
-    # a few possible names we've encountered.
     conf = model.config
     max_length = None
     for length_setting in ["n_positions", "max_position_embeddings", "seq_length"]:
         max_length = getattr(model.config, length_setting, None)
         if max_length:
-            logger.info(f"Found max lenth: {max_length}")
+            logger.info(f"Found max length: {max_length}")
             break
     if not max_length:
         max_length = 1024
@@ -218,7 +196,6 @@ def train(
         tokenizer=tokenizer, mlm=False, return_tensors="pt", pad_to_multiple_of=8
     )
 
-    # enable fp16 if not bf16
     fp16 = not bf16
 
     if not dbfs_output_dir:
@@ -272,50 +249,3 @@ def train(
         trainer.save_model(output_dir=dbfs_output_dir)
 
     logger.info("Done.")
-
-
-@click.command()
-@click.option("--input-model", type=str, help="Input model to fine tune", default=DEFAULT_INPUT_MODEL)
-@click.option("--local-output-dir", type=str, help="Write directly to this local path", required=True)
-@click.option("--dbfs-output-dir", type=str, help="Sync data to this path on DBFS")
-@click.option("--epochs", type=int, default=3, help="Number of epochs to train for.")
-@click.option("--per-device-train-batch-size", type=int, default=8, help="Batch size to use for training.")
-@click.option("--per-device-eval-batch-size", type=int, default=8, help="Batch size to use for evaluation.")
-@click.option(
-    "--test-size", type=int, default=1000, help="Number of test records for evaluation, or ratio of test records."
-)
-@click.option("--warmup-steps", type=int, default=None, help="Number of steps to warm up to learning rate")
-@click.option("--logging-steps", type=int, default=10, help="How often to log")
-@click.option("--eval-steps", type=int, default=50, help="How often to run evaluation on test records")
-@click.option("--save-steps", type=int, default=400, help="How often to checkpoint the model")
-@click.option("--save-total-limit", type=int, default=10, help="Maximum number of checkpoints to keep on disk")
-@click.option("--lr", type=float, default=1e-5, help="Learning rate to use for training.")
-@click.option("--seed", type=int, default=DEFAULT_SEED, help="Seed to use for training.")
-@click.option("--deepspeed", type=str, default=None, help="Path to deepspeed config file.")
-@click.option("--training-dataset", type=str, default=DEFAULT_TRAINING_DATASET, help="Path to dataset for training")
-@click.option(
-    "--gradient-checkpointing/--no-gradient-checkpointing",
-    is_flag=True,
-    default=True,
-    help="Use gradient checkpointing?",
-)
-@click.option(
-    "--local_rank",
-    type=str,
-    default=True,
-    help="Provided by deepspeed to identify which instance this process is when performing multi-GPU training.",
-)
-@click.option("--bf16", type=bool, default=None, help="Whether to use bf16 (preferred on A100's).")
-def main(**kwargs):
-    train(**kwargs)
-
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s", level=logging.INFO, datefmt="%Y-%m-%d %H:%M:%S"
-    )
-    try:
-        main()
-    except Exception:
-        logger.exception("main failed")
-        raise
