@@ -2,27 +2,31 @@ import torch
 from transformers import GPTNeoXForCausalLM, AutoTokenizer
 from datasets import load_dataset
 from torch.utils.data import DataLoader
-from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
+import os
+import datetime
+
+# Current date and time for folder naming
+now = datetime.datetime.now()
+date_time = now.strftime("%Y%m%d-%H%M%S")
+model_name = "gptneo"
+directory_name = f"{date_time}-{model_name}"
+os.makedirs(directory_name, exist_ok=True)
 
 # Load model and tokenizer
 model = GPTNeoXForCausalLM.from_pretrained(".")
 tokenizer = AutoTokenizer.from_pretrained(".")
 
-# Add padding token if it doesn't exist
 if tokenizer.pad_token is None:
     tokenizer.add_special_tokens({'pad_token': '[PAD]'})
     model.resize_token_embeddings(len(tokenizer))
 
-# Load dataset
 dataset = load_dataset("databricks/databricks-dolly-15k")
 
-# Split dataset into training and test sets
 train_test_split = dataset['train'].train_test_split(test_size=0.1)
 train_dataset = train_test_split['train']
 test_dataset = train_test_split['test']
 
-# Preprocess dataset
 def preprocess_function(examples):
     instruction = examples['instruction']
     context = examples['context']
@@ -35,39 +39,33 @@ def preprocess_function(examples):
     tokenized = tokenizer(text, truncation=True, padding='max_length', max_length=1000)
     return tokenized
 
-# Apply the preprocessing function to the dataset
 train_dataset = train_dataset.map(preprocess_function, batched=True, remove_columns=train_dataset.column_names)
 test_dataset = test_dataset.map(preprocess_function, batched=True, remove_columns=test_dataset.column_names)
 
-# Define a collate function to convert lists to tensors
 def collate_fn(batch):
     input_ids = torch.tensor([item['input_ids'] for item in batch])
     attention_mask = torch.tensor([item['attention_mask'] for item in batch])
     return {'input_ids': input_ids, 'attention_mask': attention_mask, 'labels': input_ids.clone()}
 
-# DataLoader
 train_dataloader = DataLoader(train_dataset, batch_size=8, shuffle=True, collate_fn=collate_fn)
 test_dataloader = DataLoader(test_dataset, batch_size=8, shuffle=False, collate_fn=collate_fn)
 
-# Training loop
 optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
 model.train()
 model.to('cuda')
 
-# Function to calculate accuracy
 def calculate_accuracy(preds, labels):
     preds = torch.argmax(preds, dim=-1)
     correct = (preds == labels).float()
     accuracy = correct.sum() / torch.numel(correct)
     return accuracy
 
-# Lists to store metrics
 train_losses = []
 test_losses = []
 train_accuracies = []
 test_accuracies = []
 
-for epoch in range(3):  # Number of epochs
+for epoch in range(3):
     total_train_loss = 0
     total_train_accuracy = 0
     model.train()
@@ -114,25 +112,29 @@ for epoch in range(3):  # Number of epochs
           f"Tst Loss: {avg_test_loss:.4f} | "
           f"Tst Acc: {avg_test_accuracy:.4f}")
 
-# Plotting the training metrics
-epochs = range(1, 4)
-plt.figure(figsize=(12, 6))
+# Save logs to file
+log_file = os.path.join(directory_name, "training_logs.txt")
+with open(log_file, "w") as file:
+    file.write("Epoch,Train Loss,Train Accuracy,Test Loss,Test Accuracy\n")
+    for epoch in range(3):
+        file.write(f"{epoch+1},{train_losses[epoch]},{train_accuracies[epoch]},{test_losses[epoch]},{test_accuracies[epoch]}\n")
 
+# Save visualization
+plt.figure(figsize=(12, 6))
 plt.subplot(1, 2, 1)
-plt.plot(epochs, train_losses, label='Train Loss')
-plt.plot(epochs, test_losses, label='Test Loss')
+plt.plot(range(1, 4), train_losses, label='Train Loss')
+plt.plot(range(1, 4), test_losses, label='Test Loss')
 plt.xlabel('Epochs')
 plt.ylabel('Loss')
 plt.title('Training and Test Loss')
 plt.legend()
 
 plt.subplot(1, 2, 2)
-plt.plot(epochs, train_accuracies, label='Train Accuracy')
-plt.plot(epochs, test_accuracies, label='Test Accuracy')
+plt.plot(range(1, 4), train_accuracies, label='Train Accuracy')
+plt.plot(range(1, 4), test_accuracies, label='Test Accuracy')
 plt.xlabel('Epochs')
 plt.ylabel('Accuracy')
 plt.title('Training and Test Accuracy')
 plt.legend()
 
-plt.tight_layout()
-plt.show()
+plt.savefig(os.path.join(directory_name, 'training_plots.png'))
