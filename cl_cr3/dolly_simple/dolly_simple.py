@@ -5,6 +5,7 @@ from functools import partial
 from typing import Any, Dict, List, Union
 
 import numpy as np
+import matplotlib.pyplot as plt
 from datasets import Dataset, load_dataset
 from transformers import (
     AutoModelForCausalLM,
@@ -13,7 +14,9 @@ from transformers import (
     Trainer,
     TrainingArguments,
     set_seed,
+    get_scheduler,
 )
+from torch.optim import AdamW
 
 # Setup logging
 logging.basicConfig(
@@ -81,8 +84,10 @@ def load_model(pretrained_model_name_or_path: str) -> AutoModelForCausalLM:
     model = AutoModelForCausalLM.from_pretrained(pretrained_model_name_or_path)
     return model
 
-def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int, seed: int, training_dataset: str) -> Dataset:
+def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int, seed: int, training_dataset: str, subset_ratio: float) -> Dataset:
     dataset = load_training_dataset(training_dataset)
+    if subset_ratio < 1.0:
+        dataset = dataset.shuffle(seed=seed).select(range(int(len(dataset) * subset_ratio)))
     logger.info("Preprocessing dataset")
     _preprocessing_function = partial(preprocess_batch, max_length=max_length, tokenizer=tokenizer)
     dataset = dataset.map(_preprocessing_function, batched=True, remove_columns=["instruction", "context", "response", "text", "category"])
@@ -92,16 +97,54 @@ def preprocess_dataset(tokenizer: AutoTokenizer, max_length: int, seed: int, tra
     logger.info("Done preprocessing")
     return dataset
 
+class CustomTrainer(Trainer):
+    def create_optimizer_and_scheduler(self, num_training_steps: int):
+        logger.info("Creating optimizer and scheduler")
+        self.optimizer = AdamW(self.model.parameters(), lr=1e-5)
+        self.lr_scheduler = get_scheduler(
+            name="linear",
+            optimizer=self.optimizer,
+            num_warmup_steps=0,
+            num_training_steps=num_training_steps,
+        )
+        logger.info("Optimizer and scheduler created")
+
+    def log_metrics(self, split, metrics):
+        # Log and save the metrics
+        logger.info(f"***** {split} metrics *****")
+        for key, value in metrics.items():
+            logger.info(f"  {key} = {value}")
+        self.save_metrics(split, metrics)
+
+    def save_metrics(self, split, metrics):
+        # Save metrics to a file
+        output_dir = self.args.output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        with open(os.path.join(output_dir, f"{split}_metrics.json"), "w") as f:
+            json.dump(metrics, f, indent=4)
+
+def plot_metrics(metrics, title, save_path):
+    plt.figure(figsize=(10, 5))
+    for key, values in metrics.items():
+        plt.plot(values, label=key)
+    plt.title(title)
+    plt.xlabel("Steps")
+    plt.ylabel("Metric")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(save_path)
+    plt.close()
+
 def train():
     logger.info("Setting seed")
     set_seed(42)
 
     input_model = "EleutherAI/pythia-2.8b"
-    local_training_root = "/path/to/training/root"
+    local_training_root = "/workspace/slice-monorepo/cl_cr3/dolly_simple"
     training_dataset = "databricks/databricks-dolly-15k"
     num_train_epochs = 3
     train_micro_batch_size_per_gpu = 1
-    gradient_accumulation_steps = 32  # Increased to achieve effective batch size
+    gradient_accumulation_steps = 8
     learning_rate = 1e-5
     logging_steps = 10
     save_steps = 200
@@ -112,6 +155,7 @@ def train():
     gradient_checkpointing = True
     local_rank = 0
     bf16 = True
+    subset_ratio = 0.1  # Use 10% of the dataset for debugging
 
     logger.info("Creating checkpoint directory")
     timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
@@ -125,7 +169,7 @@ def train():
 
     logger.info("Getting max length")
     max_length = getattr(model.config, "max_position_embeddings", 1024)
-    processed_dataset = preprocess_dataset(tokenizer, max_length, 42, training_dataset)
+    processed_dataset = preprocess_dataset(tokenizer, max_length, 42, training_dataset, subset_ratio)
     split_dataset = processed_dataset.train_test_split(test_size=test_size, seed=42)
 
     logger.info("Train data size: %d", split_dataset["train"].num_rows)
@@ -158,8 +202,8 @@ def train():
         gradient_accumulation_steps=gradient_accumulation_steps
     )
 
-    logger.info("Instantiating Trainer")
-    trainer = Trainer(
+    logger.info("Instantiating CustomTrainer")
+    trainer = CustomTrainer(
         model=model,
         tokenizer=tokenizer,
         args=training_args,
@@ -169,10 +213,17 @@ def train():
     )
 
     logger.info("Training")
-    trainer.train()
+    train_result = trainer.train()
 
-    logger.info(f"Saving Model to {local_output_dir}")
+    logger.info("Evaluating")
+    eval_result = trainer.evaluate()
+
+    logger.info("Saving Model")
     trainer.save_model(output_dir=local_output_dir)
+
+    logger.info("Plotting Metrics")
+    plot_metrics(train_result.metrics, "Training Metrics", os.path.join(local_output_dir, "training_metrics.png"))
+    plot_metrics(eval_result, "Validation Metrics", os.path.join(local_output_dir, "validation_metrics.png"))
 
     logger.info("Done.")
 
