@@ -23,3 +23,4 @@ llama-2-7b-chat/
 *.h5
 cl_cr3/aligned data/
 cl_cr3/dolly_custom/dolly_env/
+*.pth
