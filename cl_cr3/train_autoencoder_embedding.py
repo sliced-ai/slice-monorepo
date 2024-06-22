@@ -198,7 +198,7 @@ if __name__ == "__main__":
     embeddings_path = 'utterance_embeddings.h5'  # Path to the HDF5 file containing embeddings
     initial_size = 4096  # Initial training data size and batch size
     increment_ratio = 0.005  # Increment ratio for progressive training
-    max_epochs = 5000  # Maximum number of epochs
+    max_epochs = 50000  # Maximum number of epochs
 
     config = {
         'experiment_name': 'bert_autoencoder_experiment'
