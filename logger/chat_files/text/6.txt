@@ -1,0 +1,4248 @@
+
+
+
+If I wanted an extremely general logging system basically I just want to wrap any and all python bash file starts with something that simply takes every printout and saves it with the time and date. 
+
+
+So wether I did something like this:
+python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a100
+or this
+    command = [
+        "deepspeed", "training/trainer.py", 
+        "--input-model", input_model,
+        "--deepspeed", deepspeed_config,
+        "--training-dataset", training_dataset,
+        "--epochs", "2",
+        "--local-output-dir", local_output_dir,
+        "--per-device-train-batch-size", str(batch_size),
+        "--per-device-eval-batch-size", str(batch_size),
+        "--logging-steps", "10",
+        "--save-steps", "200",
+        "--save-total-limit", "20",
+        "--eval-steps", "50",
+        "--warmup-steps", "50",
+        "--test-size", "200",
+        "--lr", "5e-6",
+        "--bf16", str(bf16).lower()
+    ]
+
+Either one could be easily wrapped and the logs saved just from the printouts without any code modifications. Is that possible?
+ChatGPT
+Yes, it's possible to create a logging wrapper to capture all printouts from any command executed in a Python or Bash environment and save them with timestamps. You can achieve this using Python by creating a script that wraps around your commands and redirects their outputs to a log file with timestamps. Here's a general approach to do this:
+
+Python Wrapper Script
+Create a Python script (log_wrapper.py) to execute commands and log outputs:
+python
+Copy code
+import subprocess
+import sys
+import datetime
+
+def log_output(logfile, process):
+    with open(logfile, 'a') as f:
+        for line in iter(process.stdout.readline, b''):
+            timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            f.write(f"{timestamp} - {line.decode('utf-8')}")
+            sys.stdout.write(line.decode('utf-8'))
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    logfile = 'command_output.log'
+    
+    with open(logfile, 'a') as f:
+        f.write(f"\n{'='*40}\n")
+        f.write(f"Command: {' '.join(command)}\n")
+        f.write(f"Start Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"{'='*40}\n")
+    
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    log_output(logfile, process)
+    
+    process.wait()
+    
+    with open(logfile, 'a') as f:
+        f.write(f"{'='*40}\n")
+        f.write(f"End Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"{'='*40}\n")
+
+if __name__ == "__main__":
+    main()
+Usage:
+
+To use this wrapper, you simply need to call it with the command you want to run:
+
+bash
+Copy code
+python log_wrapper.py python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a100
+Or for a more complex command:
+
+bash
+Copy code
+python log_wrapper.py deepspeed training/trainer.py --input-model databricks/dolly-v2-3b --deepspeed deepspeed_config.json --training-dataset dataset --epochs 2 --local-output-dir output_dir --per-device-train-batch-size 8 --per-device-eval-batch-size 8 --logging-steps 10 --save-steps 200 --save-total-limit 20 --eval-steps 50 --warmup-steps 50 --test-size 200 --lr 5e-6 --bf16 true
+Explanation:
+log_output(logfile, process): This function reads the process's output line by line, adds a timestamp, writes it to the logfile, and also prints it to the console.
+main(): This function checks if the command is provided, sets up the logfile, starts the subprocess with the given command, and logs the output.
+Timestamping: Each log entry is prefixed with a timestamp to record when each line of output was generated.
+This script can be used to wrap any command, capturing its output and logging it with timestamps. It requires no modifications to the commands themselves, making it a flexible solution for your needs.
+
+Can you also save more info when doing this. 
+
+So in the logs I want the file name to have the name of the python file that was run So in the above the file names would have train_doll and trainer in them after the time-date.
+
+I also want at the very top of the log file the original command that started it. So in the above I want everything but the log wrapper part saved at the top. 
+
+Right below the command that started it I want the following information:
+
+1. if the file suceeded say so 
+2. If the file failed, save the error as to why
+3. if it was user canceled such as control c say so. 
+
+So final order of a full log file will look like
+
+
+filename: datetime-filename
+
+inside:
+- Command that started it in full
+- pass/fail/cancel info
+-full print out of all logs
+ChatGPT
+To achieve this, we can extend the previous log_wrapper.py script to include more detailed logging information. Here is an updated version that incorporates your requirements:
+
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import os
+import signal
+
+def log_output(logfile, process):
+    with open(logfile, 'a') as f:
+        for line in iter(process.stdout.readline, b''):
+            timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            f.write(f"{timestamp} - {line.decode('utf-8')}")
+            sys.stdout.write(line.decode('utf-8'))
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    filename = os.path.basename(command[0]).split('.')[0]
+    logfile = datetime.datetime.now().strftime(f"%Y%m%d_%H%M%S_{filename}.log")
+    
+    with open(logfile, 'a') as f:
+        f.write(f"Command: {' '.join(command)}\n")
+        f.write(f"{'='*40}\n")
+        f.write(f"Start Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"{'='*40}\n")
+    
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        log_output(logfile, process)
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    
+    with open(logfile, 'a') as f:
+        f.write(f"{'='*40}\n")
+        f.write(f"End Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"{'='*40}\n")
+        f.write(f"Status: {status}\n")
+        f.write(f"{'='*40}\n")
+
+if __name__ == "__main__":
+    main()
+Explanation of the changes:
+Filename Generation: The log filename now includes the date-time and the name of the Python file being run.
+
+python
+Copy code
+filename = os.path.basename(command[0]).split('.')[0]
+logfile = datetime.datetime.now().strftime(f"%Y%m%d_%H%M%S_{filename}.log")
+Initial Log Entries: The original command is saved at the top of the log file along with a separator and the start time.
+
+python
+Copy code
+with open(logfile, 'a') as f:
+    f.write(f"Command: {' '.join(command)}\n")
+    f.write(f"{'='*40}\n")
+    f.write(f"Start Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    f.write(f"{'='*40}\n")
+Process Execution and Logging: The script logs the output as before but now also handles different exit conditions (success, failure, user cancellation).
+
+python
+Copy code
+try:
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    log_output(logfile, process)
+    process.wait()
+    
+    if process.returncode == 0:
+        status = "Success"
+    else:
+        status = f"Failed with return code {process.returncode}"
+        
+except KeyboardInterrupt:
+    process.terminate()
+    status = "User canceled (KeyboardInterrupt)"
+except Exception as e:
+    status = f"Failed with exception: {e}"
+Final Log Entries: At the end of the log file, it writes the end time and the status of the execution.
+
+python
+Copy code
+with open(logfile, 'a') as f:
+    f.write(f"{'='*40}\n")
+    f.write(f"End Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    f.write(f"{'='*40}\n")
+    f.write(f"Status: {status}\n")
+    f.write(f"{'='*40}\n")
+This script will now create a log file named with the datetime and the script's name, containing the full command, status (success, failure, or cancellation), and the full output logs with timestamps.
+
+Can you update this for the following.
+
+
+1. save as a json format
+2. Also right below the command output can you put GPU utilization
+3. And below gpu utilization I also want you to put a runtime
+
+3/3
+
+ChatGPT
+Sure, let's update the script to save the log in JSON format and include GPU utilization and runtime information. For GPU utilization, we can use the nvidia-smi command to get the GPU usage.
+
+Here is the updated script:
+
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import signal
+import time
+
+def log_output(logfile, process):
+    log_entries = []
+    for line in iter(process.stdout.readline, b''):
+        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_entries.append({"timestamp": timestamp, "output": line.decode('utf-8').strip()})
+        sys.stdout.write(line.decode('utf-8'))
+    return log_entries
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    filename = os.path.basename(command[0]).split('.')[0]
+    logfile = datetime.datetime.now().strftime(f"%Y%m%d_%H%M%S_{filename}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        log_data["logs"] = log_output(logfile, process)
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    
+    end_time = datetime.datetime.now()
+    runtime = end_time - start_time
+    
+    log_data.update({
+        "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "status": status,
+        "runtime": str(runtime)
+    })
+    
+    with open(logfile, 'w') as f:
+        json.dump(log_data, f, indent=4)
+
+if __name__ == "__main__":
+    main()
+Explanation of the changes:
+JSON Logging: The log data is now stored in a dictionary and written to a JSON file at the end of execution.
+
+python
+Copy code
+log_data = {
+    "command": ' '.join(command),
+    "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+    "gpu_utilization": get_gpu_utilization(),
+    "logs": []
+}
+GPU Utilization: The get_gpu_utilization function retrieves the GPU utilization using nvidia-smi.
+
+python
+Copy code
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+Runtime Calculation: The script calculates the runtime of the command and includes it in the log data.
+
+python
+Copy code
+end_time = datetime.datetime.now()
+runtime = end_time - start_time
+log_data.update({
+    "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+    "status": status,
+    "runtime": str(runtime)
+})
+Writing to JSON File: The log data is written to a JSON file at the end of the script execution.
+
+python
+Copy code
+with open(logfile, 'w') as f:
+    json.dump(log_data, f, indent=4)
+This script will create a JSON log file that includes the command, start time, GPU utilization, logs with timestamps, end time, status, and runtime.
+
+I also want a constant value in the script that's a folder location to save at
+ChatGPT
+Sure, let's add a constant value for the folder location to save the log files. We'll create a LOG_DIR constant and use it to determine where to save the log files. Here is the updated script:
+
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import signal
+import time
+
+LOG_DIR = "/path/to/log/folder"  # Update this to your desired log folder location
+
+def log_output(logfile, process):
+    log_entries = []
+    for line in iter(process.stdout.readline, b''):
+        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_entries.append({"timestamp": timestamp, "output": line.decode('utf-8').strip()})
+        sys.stdout.write(line.decode('utf-8'))
+    return log_entries
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    filename = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    logfile = os.path.join(LOG_DIR, f"{timestamp}_{filename}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        log_data["logs"] = log_output(logfile, process)
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    
+    end_time = datetime.datetime.now()
+    runtime = end_time - start_time
+    
+    log_data.update({
+        "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "status": status,
+        "runtime": str(runtime)
+    })
+    
+    os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the log directory exists
+    with open(logfile, 'w') as f:
+        json.dump(log_data, f, indent=4)
+
+if __name__ == "__main__":
+    main()
+Explanation of the changes:
+LOG_DIR Constant: Added a constant LOG_DIR to specify the folder location for saving log files.
+
+python
+Copy code
+LOG_DIR = "/path/to/log/folder"  # Update this to your desired log folder location
+Log File Path: The log file path is now constructed using the LOG_DIR constant.
+
+python
+Copy code
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+logfile = os.path.join(LOG_DIR, f"{timestamp}_{filename}.json")
+Ensure Log Directory Exists: Added a check to ensure the log directory exists, creating it if necessary.
+
+python
+Copy code
+os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the log directory exists
+With these updates, the script will save the log files in the specified folder location defined by the LOG_DIR constant. Make sure to update LOG_DIR with the desired path for your log files.
+
+ok now also give me a command that maps this so I can run it anywhere.
+
+I want to be able to say 
+
+log (python command) 
+
+in any folder and it will run the script
+ChatGPT
+To be able to run the logging script from anywhere using a command like log (python command), you can create a bash alias or a small wrapper script that includes the logging script's functionality. Here's how you can do it:
+
+Create a Wrapper Script: Save the logging script as log_wrapper.py in a known location (e.g., /usr/local/bin/).
+
+Create a Bash Script: Create a bash script that calls the log_wrapper.py with the provided command. Save this bash script also in a known location (e.g., /usr/local/bin/) and make it executable.
+
+Here’s how you can do this step-by-step:
+
+Step 1: Save log_wrapper.py
+Save your log_wrapper.py script to /usr/local/bin/log_wrapper.py (or any directory included in your PATH):
+
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import signal
+import time
+
+LOG_DIR = "/path/to/log/folder"  # Update this to your desired log folder location
+
+def log_output(logfile, process):
+    log_entries = []
+    for line in iter(process.stdout.readline, b''):
+        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_entries.append({"timestamp": timestamp, "output": line.decode('utf-8').strip()})
+        sys.stdout.write(line.decode('utf-8'))
+    return log_entries
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    filename = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    logfile = os.path.join(LOG_DIR, f"{timestamp}_{filename}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        log_data["logs"] = log_output(logfile, process)
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    
+    end_time = datetime.datetime.now()
+    runtime = end_time - start_time
+    
+    log_data.update({
+        "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "status": status,
+        "runtime": str(runtime)
+    })
+    
+    os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the log directory exists
+    with open(logfile, 'w') as f:
+        json.dump(log_data, f, indent=4)
+
+if __name__ == "__main__":
+    main()
+Step 2: Create a Bash Script
+Create a bash script /usr/local/bin/log with the following content:
+
+bash
+Copy code
+#!/bin/bash
+
+# Call the log_wrapper.py script with the provided command
+python /usr/local/bin/log_wrapper.py "$@"
+Make sure the bash script is executable:
+
+bash
+Copy code
+chmod +x /usr/local/bin/log
+Step 3: Update Your PATH
+Ensure that /usr/local/bin/ is in your PATH. You can check this by running:
+
+bash
+Copy code
+echo $PATH
+If /usr/local/bin/ is not in your PATH, you can add it by adding the following line to your .bashrc or .bash_profile:
+
+bash
+Copy code
+export PATH=$PATH:/usr/local/bin
+After updating the .bashrc or .bash_profile, reload it:
+
+bash
+Copy code
+source ~/.bashrc  # or source ~/.bash_profile
+Usage
+Now you can use the log command from anywhere to run your Python scripts and log their output. For example:
+
+bash
+Copy code
+log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a100
+Or for a more complex command:
+
+bash
+Copy code
+log deepspeed training/trainer.py --input-model databricks/dolly-v2-3b --deepspeed deepspeed_config.json --training-dataset dataset --epochs 2 --local-output-dir output_dir --per-device-train-batch-size 8 --per-device-eval-batch-size 8 --logging-steps 10 --save-steps 200 --save-total-limit 20 --eval-steps 50 --warmup-steps 50 --test-size 200 --lr 5e-6 --bf16 true
+This setup ensures that you can log the output of any command from any location using the log command.
+
+I want the wrapper to sit here in my git repo:
+root@004e917612ec:/workspace/slice-monorepo# ls
+cl_cr3    conda.sh     hf     log_wrapper.py  thebeast
+clone.sh  download.sh  llama  setupsshkey.sh  update_git.sh
+root@004e917612ec:/workspace/slice-monorepo# pwd
+/workspace/slice-monorepo
+
+Give me a bash script that sets up this functionality for my log wrapper.
+ChatGPT
+Sure, let's create a bash script that will set up this functionality for your log wrapper located in your git repo at /workspace/slice-monorepo/log_wrapper.py.
+
+Here is the bash script to set up the log command:
+
+bash
+Copy code
+#!/bin/bash
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/log_wrapper.py"
+
+# Define the target directory for the symbolic link
+TARGET_DIR="/usr/local/bin"
+
+# Create the log command as a symbolic link to the log_wrapper.py
+ln -sf $LOG_WRAPPER_PATH $TARGET_DIR/log
+
+# Ensure the log_wrapper.py script is executable
+chmod +x $LOG_WRAPPER_PATH
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+Steps to Use the Script
+Create the Bash Script: Save the following content to a file named setup_log_command.sh in your repository:
+bash
+Copy code
+#!/bin/bash
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/log_wrapper.py"
+
+# Define the target directory for the symbolic link
+TARGET_DIR="/usr/local/bin"
+
+# Create the log command as a symbolic link to the log_wrapper.py
+ln -sf $LOG_WRAPPER_PATH $TARGET_DIR/log
+
+# Ensure the log_wrapper.py script is executable
+chmod +x $LOG_WRAPPER_PATH
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+Make the Script Executable: Make sure the script is executable by running:
+bash
+Copy code
+chmod +x setup_log_command.sh
+Run the Setup Script: Run the setup script:
+bash
+Copy code
+./setup_log_command.sh
+This script will:
+
+Create a symbolic link to log_wrapper.py in /usr/local/bin named log.
+Ensure log_wrapper.py is executable.
+Add /usr/local/bin to your PATH if it’s not already included.
+Usage
+After running the setup script, you can use the log command from anywhere to run your Python scripts and log their output. For example:
+
+bash
+Copy code
+log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a100
+Or for a more complex command:
+
+bash
+Copy code
+log deepspeed training/trainer.py --input-model databricks/dolly-v2-3b --deepspeed deepspeed_config.json --training-dataset dataset --epochs 2 --local-output-dir output_dir --per-device-train-batch-size 8 --per-device-eval-batch-size 8 --logging-steps 10 --save-steps 200 --save-total-limit 20 --eval-steps 50 --warmup-steps 50 --test-size 200 --lr 5e-6 --bf16 true
+This will enable you to log the output of any command from any location using the log command.
+
+root@004e917612ec:/workspace/slice-monorepo# bash setup_logger.sh 
+Setup complete. You can now use the 'log' command from anywhere.
+
+(dolly_env) root@004e917612ec:/workspace/slice-monorepo/cl_cr3/dolly_custom# log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000
+/usr/local/bin/log: line 1: import: command not found
+/usr/local/bin/log: line 2: import: command not found
+/usr/local/bin/log: line 3: import: command not found
+/usr/local/bin/log: line 4: import: command not found
+/usr/local/bin/log: line 5: import: command not found
+/usr/local/bin/log: line 6: import: command not found
+/usr/local/bin/log: line 7: import: command not found
+/usr/local/bin/log: line 9: LOG_DIR: command not found
+/usr/local/bin/log: line 11: syntax error near unexpected token ('
+/usr/local/bin/log: line 11: def log_output(logfile, process):'
+ChatGPT
+The error you're encountering is because the symbolic link is being interpreted as a shell script instead of a Python script. To fix this, you need to ensure that the log_wrapper.py script is executed with the Python interpreter.
+
+Let's update the setup script to create a wrapper script that explicitly calls the Python interpreter with the log_wrapper.py script. Here’s how you can do it:
+
+Step 1: Update setup_log_command.sh to create a bash wrapper
+Update your setup_log_command.sh to the following content:
+
+bash
+Copy code
+#!/bin/bash
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+Step 2: Make the Setup Script Executable
+Make sure the script is executable:
+
+bash
+Copy code
+chmod +x setup_log_command.sh
+Step 3: Run the Setup Script
+Run the setup script:
+
+bash
+Copy code
+./setup_log_command.sh
+Explanation
+Create a Bash Wrapper Script: This script creates a new bash script in /usr/local/bin named log that calls the log_wrapper.py using the Python interpreter.
+
+bash
+Copy code
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+Make the Wrapper Script Executable: The script ensures that the new wrapper script is executable.
+
+bash
+Copy code
+chmod +x $TARGET_DIR/log
+Update PATH: If /usr/local/bin is not already in the PATH, the script adds it to the PATH.
+
+bash
+Copy code
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+This setup ensures that when you use the log command, it correctly invokes the Python interpreter to run the log_wrapper.py script. You should now be able to run commands using log from anywhere.
+
+Usage
+After running the setup script, you can use the log command as follows:
+
+bash
+Copy code
+log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000
+This should properly log the output of your Python script with the log wrapper functionality.
+
+Running this:
+root@004e917612ec:/workspace/slice-monorepo/cl_cr3/dolly_custom# log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000
+root@004e917612ec:/workspace/slice-monorepo/cl_cr3/dolly_custom#
+
+command"python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000"
+start_time"2024-06-19 17:35:12"
+gpu_utilization"0"
+logs
+end_time"2024-06-19 17:35:12"
+status"Failed with exception: 'str' object has no attribute 'decode'"
+runtime"0:00:00.055173"
+
+
+Also can you update the python I still want all the printouts to come to the screen but I also want to save them. 
+
+2/2
+
+ChatGPT
+The issue with the 'str' object has no attribute 'decode' error arises because in Python 3, the subprocess output is already a string, so you don't need to decode it. Let's update the Python script to handle the subprocess output correctly and ensure that it prints the output to the screen as well as saves it to the log file.
+
+Here's the updated log_wrapper.py script:
+
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import signal
+import time
+
+LOG_DIR = "/path/to/log/folder"  # Update this to your desired log folder location
+
+def log_output(logfile, process):
+    log_entries = []
+    with open(logfile, 'a') as f:
+        for line in process.stdout:
+            timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            log_entry = {"timestamp": timestamp, "output": line.strip()}
+            log_entries.append(log_entry)
+            f.write(f"{timestamp} - {line}")
+            sys.stdout.write(line)
+    return log_entries
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    filename = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    logfile = os.path.join(LOG_DIR, f"{timestamp}_{filename}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        log_data["logs"] = log_output(logfile, process)
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    
+    end_time = datetime.datetime.now()
+    runtime = end_time - start_time
+    
+    log_data.update({
+        "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "status": status,
+        "runtime": str(runtime)
+    })
+    
+    os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the log directory exists
+    with open(logfile, 'w') as f:
+        json.dump(log_data, f, indent=4)
+
+if __name__ == "__main__":
+    main()
+Explanation of the Changes:
+Removed .decode('utf-8'): In Python 3, the subprocess output is already a string, so decoding is unnecessary.
+Write to Log File and Print to Screen: Updated the log_output function to write to the log file and print to the screen simultaneously.
+Setup Script
+The setup script remains the same, ensuring that the log command works from any directory.
+
+Usage
+Run the setup script if not done already:
+
+bash
+Copy code
+chmod +x setup_log_command.sh
+./setup_log_command.sh
+Now, you can use the log command to run your Python scripts and log their output:
+
+bash
+Copy code
+log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000
+This setup ensures that the output is both printed to the screen and saved in the log file with the proper handling of subprocess outputs in Python 3.
+
+still see no printouts from my process
+ChatGPT
+I apologize for the inconvenience. Let's make sure that the output from the subprocess is properly streamed to both the log file and the console. I'll update the script to use a more reliable method for capturing and printing the subprocess output.
+
+Here is the revised log_wrapper.py script:
+
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import signal
+import time
+
+LOG_DIR = "/path/to/log/folder"  # Update this to your desired log folder location
+
+def log_output(logfile, process):
+    log_entries = []
+    with open(logfile, 'a') as f:
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_entry = {"timestamp": timestamp, "output": line.strip()}
+                log_entries.append(log_entry)
+                f.write(f"{timestamp} - {line}")
+                sys.stdout.write(line)
+    return log_entries
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    filename = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    logfile = os.path.join(LOG_DIR, f"{timestamp}_{filename}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log_data["logs"] = log_output(logfile, process)
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    
+    end_time = datetime.datetime.now()
+    runtime = end_time - start_time
+    
+    log_data.update({
+        "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "status": status,
+        "runtime": str(runtime)
+    })
+    
+    os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the log directory exists
+    with open(logfile, 'w') as f:
+        json.dump(log_data, f, indent=4)
+
+if __name__ == "__main__":
+    main()
+Explanation of the Changes:
+Buffered Reading: The bufsize=1 argument in subprocess.Popen ensures line-buffered output.
+Reading Loop: The while True loop reads lines continuously from the subprocess's stdout, writing each line to both the log file and the console.
+Setup Script
+The setup script remains the same:
+
+bash
+Copy code
+#!/bin/bash
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+Usage
+Run the setup script if not done already:
+
+bash
+Copy code
+chmod +x setup_log_command.sh
+./setup_log_command.sh
+Now, you should be able to use the log command and see the output printed to the screen as well as saved to the log file:
+
+bash
+Copy code
+log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000
+This ensures that the subprocess output is properly captured, printed to the console, and saved to the log file with timestamps.
+
+(dolly_env) root@004e917612ec:/workspace/slice-monorepo/cl_cr3/dolly_custom# log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000
+[2024-06-19 17:40:11,663] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+ [WARNING]  async_io requires the dev libaio .so object and headers but these were not found.
+ [WARNING]  async_io: please install the libaio-dev package with apt
+ [WARNING]  If libaio is already installed (perhaps from source), try setting the CFLAGS and LDFLAGS environment variables to where it can be found.
+ [WARNING]  Please specify the CUTLASS repo directory as environment variable $CUTLASS_PATH
+ [WARNING]  please install triton==1.0.0 if you want to use sparse attention
+[2024-06-19 17:40:17,219] [WARNING] [runner.py:202:fetch_hostfile] Unable to find hostfile, will proceed with training with local resources only.
+[2024-06-19 17:40:17,219] [INFO] [runner.py:568:main] cmd = /workspace/slice-monorepo/cl_cr3/dolly_custom/dolly_env/bin/python -u -m deepspeed.launcher.launch --world_info=eyJsb2NhbGhvc3QiOiBbMF19 --master_addr=127.0.0.1 --master_port=29500 --enable_each_rank_log=None training/trainer.py --input-model databricks/dolly-v2-3b --deepspeed /workspace/slice-monorepo/cl_cr3/dolly_custom/config/a6000_config.json --training-dataset databricks/databricks-dolly-15k --epochs 2 --local-output-dir /root/dolly_training/dolly__2024-06-19T17:39:39 --per-device-train-batch-size 3 --per-device-eval-batch-size 3 --logging-steps 10 --save-steps 200 --save-total-limit 20 --eval-steps 50 --warmup-steps 50 --test-size 200 --lr 5e-6 --bf16 true
+[2024-06-19 17:40:19,440] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+ [WARNING]  async_io requires the dev libaio .so object and headers but these were not found.
+ [WARNING]  async_io: please install the libaio-dev package with apt
+ [WARNING]  If libaio is already installed (perhaps from source), try setting the CFLAGS and LDFLAGS environment variables to where it can be found.
+ [WARNING]  Please specify the CUTLASS repo directory as environment variable $CUTLASS_PATH
+ [WARNING]  please install triton==1.0.0 if you want to use sparse attention
+[2024-06-19 17:40:24,352] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_DEV_PACKAGE=libnccl-dev=2.15.5-1+cuda11.8
+[2024-06-19 17:40:24,352] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_DEV_PACKAGE_VERSION=2.15.5-1
+[2024-06-19 17:40:24,352] [INFO] [launch.py:139:main] 0 NCCL_VERSION=2.15.5-1
+[2024-06-19 17:40:24,352] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_DEV_PACKAGE_NAME=libnccl-dev
+[2024-06-19 17:40:24,352] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_PACKAGE=libnccl2=2.15.5-1+cuda11.8
+[2024-06-19 17:40:24,352] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_PACKAGE_NAME=libnccl2
+[2024-06-19 17:40:24,352] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_PACKAGE_VERSION=2.15.5-1
+[2024-06-19 17:40:24,352] [INFO] [launch.py:146:main] WORLD INFO DICT: {'localhost': [0]}
+[2024-06-19 17:40:24,352] [INFO] [launch.py:152:main] nnodes=1, num_local_procs=1, node_rank=0
+[2024-06-19 17:40:24,352] [INFO] [launch.py:163:main] global_rank_mapping=defaultdict(<class 'list'>, {'localhost': [0]})
+[2024-06-19 17:40:24,352] [INFO] [launch.py:164:main] dist_world_size=1
+[2024-06-19 17:40:24,352] [INFO] [launch.py:168:main] Setting CUDA_VISIBLE_DEVICES=0
+[2024-06-19 17:40:24,354] [INFO] [launch.py:256:main] process 25913 spawned with command: ['/workspace/slice-monorepo/cl_cr3/dolly_custom/dolly_env/bin/python', '-u', 'training/trainer.py', '--local_rank=0', '--input-model', 'databricks/dolly-v2-3b', '--deepspeed', '/workspace/slice-monorepo/cl_cr3/dolly_custom/config/a6000_config.json', '--training-dataset', 'databricks/databricks-dolly-15k', '--epochs', '2', '--local-output-dir', '/root/dolly_training/dolly__2024-06-19T17:39:39', '--per-device-train-batch-size', '3', '--per-device-eval-batch-size', '3', '--logging-steps', '10', '--save-steps', '200', '--save-total-limit', '20', '--eval-steps', '50', '--warmup-steps', '50', '--test-size', '200', '--lr', '5e-6', '--bf16', 'true']
+^C(dolly_env) root@004e917612ec:/workspace/slice-monorepo/cl_cr3/dolly_custom# 
+
+
+canceling the process did not save logs
+ChatGPT
+To ensure that logs are saved when the process is canceled with a keyboard interrupt (Ctrl+C), we need to properly handle the KeyboardInterrupt exception and make sure to finalize the log data correctly. Below is the updated script that addresses this issue:
+
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import signal
+import time
+
+LOG_DIR = "/path/to/log/folder"  # Update this to your desired log folder location
+
+def log_output(logfile, process):
+    log_entries = []
+    with open(logfile, 'a') as f:
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_entry = {"timestamp": timestamp, "output": line.strip()}
+                log_entries.append(log_entry)
+                f.write(f"{timestamp} - {line}")
+                sys.stdout.write(line)
+    return log_entries
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    filename = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    logfile = os.path.join(LOG_DIR, f"{timestamp}_{filename}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    process = None
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log_data["logs"] = log_output(logfile, process)
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    finally:
+        end_time = datetime.datetime.now()
+        runtime = end_time - start_time
+        
+        log_data.update({
+            "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "status": status,
+            "runtime": str(runtime)
+        })
+        
+        os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the log directory exists
+        with open(logfile, 'w') as f:
+            json.dump(log_data, f, indent=4)
+        
+        print(f"\nLog saved to {logfile}")
+
+if __name__ == "__main__":
+    main()
+Explanation of the Changes:
+Proper Exception Handling: Added a finally block to ensure that the log data is saved regardless of how the script exits (success, failure, or cancellation).
+Process Termination: Properly terminate the process if a KeyboardInterrupt is caught.
+Print Log File Location: Print the log file location at the end for confirmation.
+Setup Script
+The setup script remains the same:
+
+bash
+Copy code
+#!/bin/bash
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+Usage
+Run the setup script if not done already:
+
+bash
+Copy code
+chmod +x setup_log_command.sh
+./setup_log_command.sh
+Now, you should be able to use the log command and see the output printed to the screen as well as saved to the log file. The logs should also be saved properly even if the process is canceled:
+
+bash
+Copy code
+log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000
+Updates needed for python logging script.
+1. file name should not be "python" it should be the script I ran in this example below it should be saved with the name train_dolly
+
+2. when keyboard interupt occurs I still want to save the logs in the files. this does not happen:
+{
+    "command": "python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a10",
+    "start_time": "2024-06-19 17:45:10",
+    "gpu_utilization": "0",
+    "logs": [],
+    "end_time": "2024-06-19 17:48:59",
+    "status": "User canceled (KeyboardInterrupt)",
+    "runtime": "0:03:49.561051"
+}
+
+
+
+(dolly_env) root@004e917612ec:/workspace/slice-monorepo/cl_cr3/dolly_custom# log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000
+[2024-06-19 17:44:48,118] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+^C
+Log saved to /workspace/logs/20240619_174445_python.json
+(dolly_env) root@004e917612ec:/workspace/slice-monorepo/cl_cr3/dolly_custom# log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a10
+[2024-06-19 17:45:12,664] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+ [WARNING]  async_io requires the dev libaio .so object and headers but these were not found.
+ [WARNING]  async_io: please install the libaio-dev package with apt
+ [WARNING]  If libaio is already installed (perhaps from source), try setting the CFLAGS and LDFLAGS environment variables to where it can be found.
+ [WARNING]  Please specify the CUTLASS repo directory as environment variable $CUTLASS_PATH
+ [WARNING]  please install triton==1.0.0 if you want to use sparse attention
+[2024-06-19 17:45:17,349] [WARNING] [runner.py:202:fetch_hostfile] Unable to find hostfile, will proceed with training with local resources only.
+[2024-06-19 17:45:17,350] [INFO] [runner.py:568:main] cmd = /workspace/slice-monorepo/cl_cr3/dolly_custom/dolly_env/bin/python -u -m deepspeed.launcher.launch --world_info=eyJsb2NhbGhvc3QiOiBbMF19 --master_addr=127.0.0.1 --master_port=29500 --enable_each_rank_log=None training/trainer.py --input-model databricks/dolly-v2-3b --deepspeed /workspace/slice-monorepo/cl_cr3/dolly_custom/config/a10_config.json --training-dataset databricks/databricks-dolly-15k --epochs 2 --local-output-dir /root/dolly_training/dolly__2024-06-19T17:45:10 --per-device-train-batch-size 3 --per-device-eval-batch-size 3 --logging-steps 10 --save-steps 200 --save-total-limit 20 --eval-steps 50 --warmup-steps 50 --test-size 200 --lr 5e-6 --bf16 true
+[2024-06-19 17:45:19,833] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+ [WARNING]  async_io requires the dev libaio .so object and headers but these were not found.
+ [WARNING]  async_io: please install the libaio-dev package with apt
+ [WARNING]  If libaio is already installed (perhaps from source), try setting the CFLAGS and LDFLAGS environment variables to where it can be found.
+ [WARNING]  Please specify the CUTLASS repo directory as environment variable $CUTLASS_PATH
+ [WARNING]  please install triton==1.0.0 if you want to use sparse attention
+[2024-06-19 17:45:24,342] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_DEV_PACKAGE=libnccl-dev=2.15.5-1+cuda11.8
+[2024-06-19 17:45:24,342] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_DEV_PACKAGE_VERSION=2.15.5-1
+[2024-06-19 17:45:24,342] [INFO] [launch.py:139:main] 0 NCCL_VERSION=2.15.5-1
+[2024-06-19 17:45:24,342] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_DEV_PACKAGE_NAME=libnccl-dev
+[2024-06-19 17:45:24,342] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_PACKAGE=libnccl2=2.15.5-1+cuda11.8
+[2024-06-19 17:45:24,342] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_PACKAGE_NAME=libnccl2
+[2024-06-19 17:45:24,342] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_PACKAGE_VERSION=2.15.5-1
+[2024-06-19 17:45:24,342] [INFO] [launch.py:146:main] WORLD INFO DICT: {'localhost': [0]}
+[2024-06-19 17:45:24,342] [INFO] [launch.py:152:main] nnodes=1, num_local_procs=1, node_rank=0
+[2024-06-19 17:45:24,342] [INFO] [launch.py:163:main] global_rank_mapping=defaultdict(<class 'list'>, {'localhost': [0]})
+[2024-06-19 17:45:24,342] [INFO] [launch.py:164:main] dist_world_size=1
+[2024-06-19 17:45:24,342] [INFO] [launch.py:168:main] Setting CUDA_VISIBLE_DEVICES=0
+[2024-06-19 17:45:24,344] [INFO] [launch.py:256:main] process 27349 spawned with command: ['/workspace/slice-monorepo/cl_cr3/dolly_custom/dolly_env/bin/python', '-u', 'training/trainer.py', '--local_rank=0', '--input-model', 'databricks/dolly-v2-3b', '--deepspeed', '/workspace/slice-monorepo/cl_cr3/dolly_custom/config/a10_config.json', '--training-dataset', 'databricks/databricks-dolly-15k', '--epochs', '2', '--local-output-dir', '/root/dolly_training/dolly__2024-06-19T17:45:10', '--per-device-train-batch-size', '3', '--per-device-eval-batch-size', '3', '--logging-steps', '10', '--save-steps', '200', '--save-total-limit', '20', '--eval-steps', '50', '--warmup-steps', '50', '--test-size', '200', '--lr', '5e-6', '--bf16', 'true']
+2024-06-19 17:45:28 INFO [__main__] Loading tokenizer for databricks/dolly-v2-3b
+Special tokens have been added in the vocabulary, make sure the associated word embeddings are fine-tuned or trained.
+2024-06-19 17:45:29 INFO [__main__] Loading model for databricks/dolly-v2-3b
+2024-06-19 17:45:37 INFO [__main__] Found max lenth: 2048
+2024-06-19 17:45:37 INFO [__main__] Loading dataset from databricks/databricks-dolly-15k
+2024-06-19 17:45:39 INFO [__main__] Found 15011 rows
+2024-06-19 17:45:39 INFO [__main__] Preprocessing dataset
+2024-06-19 17:45:39 INFO [__main__] Processed dataset has 15011 rows
+2024-06-19 17:45:39 INFO [__main__] Processed dataset has 14977 rows after filtering for truncated records
+2024-06-19 17:45:39 INFO [__main__] Shuffling dataset
+2024-06-19 17:45:39 INFO [__main__] Done preprocessing
+2024-06-19 17:45:39 INFO [__main__] Train data size: 14777
+2024-06-19 17:45:39 INFO [__main__] Test data size: 200
+/workspace/slice-monorepo/cl_cr3/dolly_custom/training/trainer.py:225: DeprecationWarning: The 'warn' method is deprecated, use 'warning' instead
+  logger.warn("Will NOT save to DBFS")
+2024-06-19 17:45:39 WARNING [__main__] Will NOT save to DBFS
+/workspace/slice-monorepo/cl_cr3/dolly_custom/dolly_env/lib/python3.10/site-packages/transformers/training_args.py:1474: FutureWarning: evaluation_strategy is deprecated and will be removed in version 4.46 of 🤗 Transformers. Use eval_strategy instead
+  warnings.warn(
+[2024-06-19 17:45:40,127] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+ [WARNING]  async_io requires the dev libaio .so object and headers but these were not found.
+ [WARNING]  async_io: please install the libaio-dev package with apt
+ [WARNING]  If libaio is already installed (perhaps from source), try setting the CFLAGS and LDFLAGS environment variables to where it can be found.
+ [WARNING]  Please specify the CUTLASS repo directory as environment variable $CUTLASS_PATH
+ [WARNING]  please install triton==1.0.0 if you want to use sparse attention
+[2024-06-19 17:45:46,685] [INFO] [comm.py:637:init_distributed] cdb=None
+[2024-06-19 17:45:46,685] [INFO] [comm.py:668:init_distributed] Initializing TorchBackend in DeepSpeed with backend nccl
+2024-06-19 17:45:46 INFO [torch.distributed.distributed_c10d] Added key: store_based_barrier_key:1 to store for rank: 0
+2024-06-19 17:45:46 INFO [torch.distributed.distributed_c10d] Rank 0: Completed store-based barrier for key:store_based_barrier_key:1 with 1 nodes.
+2024-06-19 17:45:46 INFO [__main__] Instantiating Trainer
+2024-06-19 17:45:47 INFO [__main__] Training
+2024-06-19 17:45:53 INFO [torch.distributed.distributed_c10d] Added key: store_based_barrier_key:2 to store for rank: 0
+2024-06-19 17:45:53 INFO [torch.distributed.distributed_c10d] Rank 0: Completed store-based barrier for key:store_based_barrier_key:2 with 1 nodes.
+Installed CUDA version 11.8 does not match the version torch was compiled with 11.7 but since the APIs are compatible, accepting this combination
+Using /root/.cache/torch_extensions/py310_cu117 as PyTorch extensions root...
+Emitting ninja build file /root/.cache/torch_extensions/py310_cu117/cpu_adam/build.ninja...
+Building extension module cpu_adam...
+Allowing ninja to set a default number of workers... (overridable by setting the environment variable MAX_JOBS=N)
+ninja: no work to do.
+Loading extension module cpu_adam...
+Time to load cpu_adam op: 2.5372438430786133 seconds
+Parameter Offload: Total persistent parameters: 1070080 in 258 params
+{'loss': 1.143, 'grad_norm': 33.23153012917946, 'learning_rate': 2.9429595503388954e-06, 'epoch': 0.0020300446609825416}
+^C
+Log saved to /workspace/logs/20240619_174510_python.json
+ChatGPT
+To address the issues:
+
+The log file name should be derived from the script name being run.
+Logs should be saved even when a KeyboardInterrupt occurs.
+Here's the updated log_wrapper.py script to achieve these requirements:
+
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import signal
+import time
+
+LOG_DIR = "/path/to/log/folder"  # Update this to your desired log folder location
+
+def log_output(logfile, process):
+    log_entries = []
+    with open(logfile, 'a') as f:
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_entry = {"timestamp": timestamp, "output": line.strip()}
+                log_entries.append(log_entry)
+                f.write(f"{timestamp} - {line}")
+                sys.stdout.write(line)
+    return log_entries
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    script_name = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    logfile = os.path.join(LOG_DIR, f"{timestamp}_{script_name}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    process = None
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log_data["logs"] = log_output(logfile, process)
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    finally:
+        end_time = datetime.datetime.now()
+        runtime = end_time - start_time
+        
+        log_data.update({
+            "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "status": status,
+            "runtime": str(runtime)
+        })
+        
+        os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the log directory exists
+        with open(logfile, 'w') as f:
+            json.dump(log_data, f, indent=4)
+        
+        print(f"\nLog saved to {logfile}")
+
+if __name__ == "__main__":
+    main()
+Explanation of the Changes:
+File Naming: The log file name is now based on the script name being run:
+python
+Copy code
+script_name = os.path.basename(command[0]).split('.')[0]
+logfile = os.path.join(LOG_DIR, f"{timestamp}_{script_name}.json")
+Save Logs on Keyboard Interrupt: The finally block ensures that logs are saved even if a KeyboardInterrupt occurs.
+Setup Script
+The setup script remains the same:
+
+bash
+Copy code
+#!/bin/bash
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+Usage
+Run the setup script if not done already:
+
+bash
+Copy code
+chmod +x setup_log_command.sh
+./setup_log_command.sh
+Now you should be able to use the log command to run your Python scripts and log their output with the correct script name in the log file and save logs even when a keyboard interrupt occurs:
+
+bash
+Copy code
+log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000
+This ensures that the log file is named after the script being run and logs are saved properly even if the process is canceled.
+
+1. change LOG_DIR to "/workspace/logs"
+2.still no logs on keyboard interupt:
+
+import subprocess
+import sys
+import datetime
+import json
+import os
+import signal
+import time
+
+LOG_DIR = "/path/to/log/folder"  # Update this to your desired log folder location
+
+def log_output(logfile, process):
+    log_entries = []
+    with open(logfile, 'a') as f:
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_entry = {"timestamp": timestamp, "output": line.strip()}
+                log_entries.append(log_entry)
+                f.write(f"{timestamp} - {line}")
+                sys.stdout.write(line)
+    return log_entries
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    script_name = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    logfile = os.path.join(LOG_DIR, f"{timestamp}_{script_name}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    process = None
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log_data["logs"] = log_output(logfile, process)
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    finally:
+        end_time = datetime.datetime.now()
+        runtime = end_time - start_time
+        
+        log_data.update({
+            "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "status": status,
+            "runtime": str(runtime)
+        })
+        
+        os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the log directory exists
+        with open(logfile, 'w') as f:
+            json.dump(log_data, f, indent=4)
+        
+        print(f"\nLog saved to {logfile}")
+
+if __name__ == "__main__":
+    main()
+
+
+(dolly_env) root@004e917612ec:/workspace/slice-monorepo/cl_cr3/dolly_custom# log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000
+[2024-06-19 17:53:46,128] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+ [WARNING]  async_io requires the dev libaio .so object and headers but these were not found.
+ [WARNING]  async_io: please install the libaio-dev package with apt
+ [WARNING]  If libaio is already installed (perhaps from source), try setting the CFLAGS and LDFLAGS environment variables to where it can be found.
+ [WARNING]  Please specify the CUTLASS repo directory as environment variable $CUTLASS_PATH
+ [WARNING]  please install triton==1.0.0 if you want to use sparse attention
+[2024-06-19 17:53:50,769] [WARNING] [runner.py:202:fetch_hostfile] Unable to find hostfile, will proceed with training with local resources only.
+[2024-06-19 17:53:50,769] [INFO] [runner.py:568:main] cmd = /workspace/slice-monorepo/cl_cr3/dolly_custom/dolly_env/bin/python -u -m deepspeed.launcher.launch --world_info=eyJsb2NhbGhvc3QiOiBbMF19 --master_addr=127.0.0.1 --master_port=29500 --enable_each_rank_log=None training/trainer.py --input-model databricks/dolly-v2-3b --deepspeed /workspace/slice-monorepo/cl_cr3/dolly_custom/config/a6000_config.json --training-dataset databricks/databricks-dolly-15k --epochs 2 --local-output-dir /root/dolly_training/dolly__2024-06-19T17:53:43 --per-device-train-batch-size 3 --per-device-eval-batch-size 3 --logging-steps 10 --save-steps 200 --save-total-limit 20 --eval-steps 50 --warmup-steps 50 --test-size 200 --lr 5e-6 --bf16 true
+[2024-06-19 17:53:53,027] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+ [WARNING]  async_io requires the dev libaio .so object and headers but these were not found.
+ [WARNING]  async_io: please install the libaio-dev package with apt
+ [WARNING]  If libaio is already installed (perhaps from source), try setting the CFLAGS and LDFLAGS environment variables to where it can be found.
+ [WARNING]  Please specify the CUTLASS repo directory as environment variable $CUTLASS_PATH
+ [WARNING]  please install triton==1.0.0 if you want to use sparse attention
+[2024-06-19 17:53:57,848] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_DEV_PACKAGE=libnccl-dev=2.15.5-1+cuda11.8
+[2024-06-19 17:53:57,848] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_DEV_PACKAGE_VERSION=2.15.5-1
+[2024-06-19 17:53:57,849] [INFO] [launch.py:139:main] 0 NCCL_VERSION=2.15.5-1
+[2024-06-19 17:53:57,849] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_DEV_PACKAGE_NAME=libnccl-dev
+[2024-06-19 17:53:57,849] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_PACKAGE=libnccl2=2.15.5-1+cuda11.8
+[2024-06-19 17:53:57,849] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_PACKAGE_NAME=libnccl2
+[2024-06-19 17:53:57,849] [INFO] [launch.py:139:main] 0 NV_LIBNCCL_PACKAGE_VERSION=2.15.5-1
+[2024-06-19 17:53:57,849] [INFO] [launch.py:146:main] WORLD INFO DICT: {'localhost': [0]}
+[2024-06-19 17:53:57,849] [INFO] [launch.py:152:main] nnodes=1, num_local_procs=1, node_rank=0
+[2024-06-19 17:53:57,849] [INFO] [launch.py:163:main] global_rank_mapping=defaultdict(<class 'list'>, {'localhost': [0]})
+[2024-06-19 17:53:57,849] [INFO] [launch.py:164:main] dist_world_size=1
+[2024-06-19 17:53:57,849] [INFO] [launch.py:168:main] Setting CUDA_VISIBLE_DEVICES=0
+[2024-06-19 17:53:57,850] [INFO] [launch.py:256:main] process 29559 spawned with command: ['/workspace/slice-monorepo/cl_cr3/dolly_custom/dolly_env/bin/python', '-u', 'training/trainer.py', '--local_rank=0', '--input-model', 'databricks/dolly-v2-3b', '--deepspeed', '/workspace/slice-monorepo/cl_cr3/dolly_custom/config/a6000_config.json', '--training-dataset', 'databricks/databricks-dolly-15k', '--epochs', '2', '--local-output-dir', '/root/dolly_training/dolly__2024-06-19T17:53:43', '--per-device-train-batch-size', '3', '--per-device-eval-batch-size', '3', '--logging-steps', '10', '--save-steps', '200', '--save-total-limit', '20', '--eval-steps', '50', '--warmup-steps', '50', '--test-size', '200', '--lr', '5e-6', '--bf16', 'true']
+^C
+Log saved to /workspace/logs/20240619_175343_python.json
+
+2/2
+
+ChatGPT
+Let's address the issue of not saving logs upon KeyboardInterrupt and ensure the log file names are correct.
+
+Updated log_wrapper.py
+Set LOG_DIR to /workspace/logs.
+Ensure logs are saved even if a KeyboardInterrupt occurs.
+Correctly name the log files based on the script being run.
+Here's the updated log_wrapper.py:
+
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import signal
+import time
+
+LOG_DIR = "/workspace/logs"  # Update this to your desired log folder location
+
+def log_output(logfile, process):
+    log_entries = []
+    with open(logfile, 'a') as f:
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_entry = {"timestamp": timestamp, "output": line.strip()}
+                log_entries.append(log_entry)
+                f.write(f"{timestamp} - {line}")
+                sys.stdout.write(line)
+    return log_entries
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    script_name = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    logfile = os.path.join(LOG_DIR, f"{timestamp}_{script_name}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    process = None
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log_data["logs"] = log_output(logfile, process)
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    finally:
+        end_time = datetime.datetime.now()
+        runtime = end_time - start_time
+        
+        log_data.update({
+            "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "status": status,
+            "runtime": str(runtime)
+        })
+        
+        os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the log directory exists
+        with open(logfile, 'w') as f:
+            json.dump(log_data, f, indent=4)
+        
+        print(f"\nLog saved to {logfile}")
+
+if __name__ == "__main__":
+    main()
+Setup Script
+The setup script remains the same:
+
+bash
+Copy code
+#!/bin/bash
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+Usage
+Run the setup script if not done already:
+
+bash
+Copy code
+chmod +x setup_log_command.sh
+./setup_log_command.sh
+Now you should be able to use the log command to run your Python scripts and log their output with the correct script name in the log file and save logs even when a keyboard interrupt occurs:
+
+bash
+Copy code
+log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000
+This ensures that the log file is named after the script being run and logs are saved properly even if the process is canceled.
+
+still no log saved on keyboard interupt the logs are empty. How are you saving logs when error occurs vs keyboard interupt?
+ChatGPT
+The issue arises because the log entries are collected inside the log_output function and are not returned if a KeyboardInterrupt occurs. We need to ensure that the logs are saved properly regardless of how the process exits. Here's the revised log_wrapper.py to handle this correctly:
+
+Updated log_wrapper.py
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import signal
+import time
+
+LOG_DIR = "/workspace/logs"  # Update this to your desired log folder location
+
+def log_output(logfile, process, log_entries):
+    with open(logfile, 'a') as f:
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_entry = {"timestamp": timestamp, "output": line.strip()}
+                log_entries.append(log_entry)
+                f.write(f"{timestamp} - {line}")
+                sys.stdout.write(line)
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    script_name = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    logfile = os.path.join(LOG_DIR, f"{timestamp}_{script_name}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    process = None
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log_output(logfile, process, log_data["logs"])
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    finally:
+        end_time = datetime.datetime.now()
+        runtime = end_time - start_time
+        
+        log_data.update({
+            "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "status": status,
+            "runtime": str(runtime)
+        })
+        
+        os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the log directory exists
+        with open(logfile, 'w') as f:
+            json.dump(log_data, f, indent=4)
+        
+        print(f"\nLog saved to {logfile}")
+
+if __name__ == "__main__":
+    main()
+Explanation of the Changes
+Pass log_entries to log_output: The log_entries list is now passed to the log_output function so it can be updated directly.
+python
+Copy code
+def log_output(logfile, process, log_entries):
+Ensure log_entries is updated: In the log_output function, log_entries is updated with each line read from the process.
+python
+Copy code
+log_entries.append(log_entry)
+Save logs in finally block: Ensures logs are saved even when a KeyboardInterrupt occurs.
+Setup Script
+The setup script remains the same:
+
+bash
+Copy code
+#!/bin/bash
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+Usage
+Run the setup script if not done already:
+
+bash
+Copy code
+chmod +x setup_log_command.sh
+./setup_log_command.sh
+Now you should be able to use the log command to run your Python scripts and log their output with the correct script name in the log file and save logs even when a keyboard interrupt occurs:
+
+bash
+Copy code
+log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000
+This ensures that the log file is named after the script being run and logs are saved properly even if the process is canceled.
+
+Could the above script be modified for the following:
+
+I would like to save all this information alongside my experiments data. 
+
+So from now on all my scripts will have a --save_location 
+
+example:
+log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000 --save_location path/to/folder
+
+I would like it if my logging code to save a copy of the logs already generated into that same location.
+
+On top of this I would like the logging system to save alongsize the data in the logs file of the save location a copy of the code that it ran. 
+
+
+So when I use "log" on a script I want you to parse the --save_location out of the scripts arguments and use them for the location to save the logs and save a copy of the script that generated it.
+
+4/4
+
+ChatGPT
+Certainly! To accommodate the requirements of parsing the --save_location argument and saving logs and a copy of the script to the specified location, we need to make some modifications to the log_wrapper.py script. Here is the updated version:
+
+Updated log_wrapper.py
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import shutil
+import signal
+import time
+
+LOG_DIR = "/workspace/logs"  # Default log directory if --save_location is not provided
+
+def log_output(logfile, process, log_entries):
+    with open(logfile, 'a') as f:
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_entry = {"timestamp": timestamp, "output": line.strip()}
+                log_entries.append(log_entry)
+                f.write(f"{timestamp} - {line}")
+                sys.stdout.write(line)
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def parse_save_location(args):
+    save_location = None
+    if '--save_location' in args:
+        index = args.index('--save_location')
+        if index + 1 < len(args):
+            save_location = args[index + 1]
+            del args[index:index + 2]  # Remove --save_location and its value from args
+    return save_location, args
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    save_location, command = parse_save_location(command)
+    
+    script_name = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    if save_location:
+        logfile = os.path.join(save_location, f"{timestamp}_{script_name}.json")
+        if not os.path.exists(save_location):
+            os.makedirs(save_location)
+        # Save a copy of the script to the save location
+        script_path = os.path.abspath(command[0])
+        shutil.copy(script_path, save_location)
+    else:
+        logfile = os.path.join(LOG_DIR, f"{timestamp}_{script_name}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    process = None
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log_output(logfile, process, log_data["logs"])
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    finally:
+        end_time = datetime.datetime.now()
+        runtime = end_time - start_time
+        
+        log_data.update({
+            "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "status": status,
+            "runtime": str(runtime)
+        })
+        
+        os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the default log directory exists
+        with open(logfile, 'w') as f:
+            json.dump(log_data, f, indent=4)
+        
+        print(f"\nLog saved to {logfile}")
+
+if __name__ == "__main__":
+    main()
+Explanation of the Changes
+Parse --save_location Argument: Added parse_save_location function to extract and remove the --save_location argument and its value from the command-line arguments.
+
+python
+Copy code
+def parse_save_location(args):
+    save_location = None
+    if '--save_location' in args:
+        index = args.index('--save_location')
+        if index + 1 < len(args):
+            save_location = args[index + 1]
+            del args[index:index + 2]  # Remove --save_location and its value from args
+    return save_location, args
+Determine Log File Location: The log file location is determined based on whether --save_location is provided.
+
+python
+Copy code
+if save_location:
+    logfile = os.path.join(save_location, f"{timestamp}_{script_name}.json")
+    if not os.path.exists(save_location):
+        os.makedirs(save_location)
+    # Save a copy of the script to the save location
+    script_path = os.path.abspath(command[0])
+    shutil.copy(script_path, save_location)
+else:
+    logfile = os.path.join(LOG_DIR, f"{timestamp}_{script_name}.json")
+Save a Copy of the Script: If --save_location is provided, a copy of the script being run is saved to the specified location.
+
+python
+Copy code
+shutil.copy(script_path, save_location)
+Setup Script
+The setup script remains the same:
+
+bash
+Copy code
+#!/bin/bash
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+Usage
+Run the setup script if not done already:
+
+bash
+Copy code
+chmod +x setup_log_command.sh
+./setup_log_command.sh
+Now you can use the log command to run your Python scripts, specifying a --save_location to store the logs and a copy of the script:
+
+bash
+Copy code
+log python train_dolly.py --input_model databricks/dolly-v2-3b --gpu_family a6000 --save_location /path/to/folder
+This setup ensures that logs and a copy of the script are saved to the specified --save_location. If --save_location is not provided, logs are saved to the default /workspace/logs directory.
+
+Ok, now Assume I have setup the script. I want you to make me a seperate bash script that has the following:
+
+1. inside the bash script is a very simple python file that just saves a text file to a location based on the --save_location path. It should also print out something to log.
+2. The bash script runs this python with the log argument. 
+3. Then the bash script should look into the folder of save_location and make sure all the data is correctly placed. 
+
+
+This is essentially a test script for it all.
+ChatGPT
+Certainly! Below is the complete bash script that includes a simple Python file, runs it with the log wrapper, and verifies that the log and script are correctly placed in the specified --save_location directory.
+
+Test Bash Script
+bash
+Copy code
+#!/bin/bash
+
+# Create a temporary directory for testing
+TEST_DIR=$(mktemp -d)
+SAVE_LOCATION="$TEST_DIR/save_location"
+
+# Create the simple Python script
+PYTHON_SCRIPT="$TEST_DIR/test_script.py"
+cat <<EOF > $PYTHON_SCRIPT
+import sys
+import os
+
+def main():
+    save_location = None
+    if '--save_location' in sys.argv:
+        index = sys.argv.index('--save_location')
+        if index + 1 < len(sys.argv):
+            save_location = sys.argv[index + 1]
+
+    if save_location:
+        os.makedirs(save_location, exist_ok=True)
+        with open(os.path.join(save_location, 'output.txt'), 'w') as f:
+            f.write("This is a test file.")
+        print("Output file created in", save_location)
+    else:
+        print("No save location provided.")
+
+if __name__ == "__main__":
+    main()
+EOF
+
+# Run the Python script with the log wrapper
+log python $PYTHON_SCRIPT --save_location $SAVE_LOCATION
+
+# Check the save_location directory for the output
+echo "Checking save location directory: $SAVE_LOCATION"
+
+if [ -f "$SAVE_LOCATION/output.txt" ]; then
+    echo "Output file is correctly placed in the save location."
+else
+    echo "Output file is missing in the save location."
+    exit 1
+fi
+
+if [ -f "$SAVE_LOCATION/test_script.py" ]; then
+    echo "Script file is correctly copied to the save location."
+else
+    echo "Script file is missing in the save location."
+    exit 1
+fi
+
+LOG_FILES=($SAVE_LOCATION/*.json)
+if [ ${#LOG_FILES[@]} -gt 0 ]; then
+    echo "Log file is correctly placed in the save location."
+else
+    echo "Log file is missing in the save location."
+    exit 1
+fi
+
+echo "All files are correctly placed in the save location."
+Explanation:
+Create Temporary Directory: The script creates a temporary directory for testing purposes.
+
+bash
+Copy code
+TEST_DIR=$(mktemp -d)
+SAVE_LOCATION="$TEST_DIR/save_location"
+Create Simple Python Script: The script creates a simple Python script that writes a text file to the --save_location directory and prints a message.
+
+bash
+Copy code
+PYTHON_SCRIPT="$TEST_DIR/test_script.py"
+cat <<EOF > $PYTHON_SCRIPT
+import sys
+import os
+
+def main():
+    save_location = None
+    if '--save_location' in sys.argv:
+        index = sys.argv.index('--save_location')
+        if index + 1 < len(sys.argv):
+            save_location = sys.argv[index + 1]
+
+    if save_location:
+        os.makedirs(save_location, exist_ok=True)
+        with open(os.path.join(save_location, 'output.txt'), 'w') as f:
+            f.write("This is a test file.")
+        print("Output file created in", save_location)
+    else:
+        print("No save location provided.")
+
+if __name__ == "__main__":
+    main()
+EOF
+Run the Python Script with Log Wrapper: The script runs the simple Python script using the log command with the --save_location argument.
+
+bash
+Copy code
+log python $PYTHON_SCRIPT --save_location $SAVE_LOCATION
+Check the Save Location Directory: The script checks if the output file, the copied script, and the log file are correctly placed in the specified save location directory.
+
+bash
+Copy code
+echo "Checking save location directory: $SAVE_LOCATION"
+
+if [ -f "$SAVE_LOCATION/output.txt" ]; then
+    echo "Output file is correctly placed in the save location."
+else
+    echo "Output file is missing in the save location."
+    exit 1
+fi
+
+if [ -f "$SAVE_LOCATION/test_script.py" ]; then
+    echo "Script file is correctly copied to the save location."
+else
+    echo "Script file is missing in the save location."
+    exit 1
+fi
+
+LOG_FILES=($SAVE_LOCATION/*.json)
+if [ ${#LOG_FILES[@]} -gt 0 ]; then
+    echo "Log file is correctly placed in the save location."
+else
+    echo "Log file is missing in the save location."
+    exit 1
+fi
+
+echo "All files are correctly placed in the save location."
+Running the Test
+To run the test, save the above script to a file, for example, test_logging.sh, make it executable, and run it:
+
+bash
+Copy code
+chmod +x test_logging.sh
+./test_logging.sh
+This script will create a simple Python script, run it with the log wrapper, and check if the log file, the script file, and the output file are correctly placed in the specified --save_location directory.
+
+python: can't open file '/workspace/slice-monorepo/log_wrapper.py': [Errno 2] No such file or directory
+Checking save location directory: /tmp/tmp.WUduOfxUwE/save_location
+Output file is missing in the save location.
+
+I moved my 3 logging files into a logger folder
+ChatGPT
+Let's update the test script to reflect the new location of the log_wrapper.py script inside the logger folder. Additionally, we'll ensure the test script creates and uses this updated path correctly.
+
+Updated Test Bash Script
+bash
+Copy code
+#!/bin/bash
+
+# Create a temporary directory for testing
+TEST_DIR=$(mktemp -d)
+SAVE_LOCATION="$TEST_DIR/save_location"
+
+# Create the simple Python script
+PYTHON_SCRIPT="$TEST_DIR/test_script.py"
+cat <<EOF > $PYTHON_SCRIPT
+import sys
+import os
+
+def main():
+    save_location = None
+    if '--save_location' in sys.argv:
+        index = sys.argv.index('--save_location')
+        if index + 1 < len(sys.argv):
+            save_location = sys.argv[index + 1]
+
+    if save_location:
+        os.makedirs(save_location, exist_ok=True)
+        with open(os.path.join(save_location, 'output.txt'), 'w') as f:
+            f.write("This is a test file.")
+        print("Output file created in", save_location)
+    else:
+        print("No save location provided.")
+
+if __name__ == "__main__":
+    main()
+EOF
+
+# Set the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/logger/log_wrapper.py"
+
+# Update the log command to use the correct path
+echo "#!/bin/bash" > /usr/local/bin/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> /usr/local/bin/log
+
+# Ensure the log wrapper script is executable
+chmod +x /usr/local/bin/log
+
+# Run the Python script with the log wrapper
+log python $PYTHON_SCRIPT --save_location $SAVE_LOCATION
+
+# Check the save_location directory for the output
+echo "Checking save location directory: $SAVE_LOCATION"
+
+if [ -f "$SAVE_LOCATION/output.txt" ]; then
+    echo "Output file is correctly placed in the save location."
+else
+    echo "Output file is missing in the save location."
+    exit 1
+fi
+
+if [ -f "$SAVE_LOCATION/test_script.py" ]; then
+    echo "Script file is correctly copied to the save location."
+else
+    echo "Script file is missing in the save location."
+    exit 1
+fi
+
+LOG_FILES=($SAVE_LOCATION/*.json)
+if [ ${#LOG_FILES[@]} -gt 0 ]; then
+    echo "Log file is correctly placed in the save location."
+else
+    echo "Log file is missing in the save location."
+    exit 1
+fi
+
+echo "All files are correctly placed in the save location."
+Explanation:
+Set the Path to log_wrapper.py: The script sets the correct path to log_wrapper.py located inside the logger folder.
+
+bash
+Copy code
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/logger/log_wrapper.py"
+Update the Log Command: The script updates the log command to use the correct path to log_wrapper.py.
+
+bash
+Copy code
+echo "#!/bin/bash" > /usr/local/bin/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> /usr/local/bin/log
+Ensure the Log Wrapper Script is Executable: The script ensures that the log command is executable.
+
+bash
+Copy code
+chmod +x /usr/local/bin/log
+Run the Python Script with the Log Wrapper: The script runs the simple Python script using the log command with the --save_location argument.
+
+bash
+Copy code
+log python $PYTHON_SCRIPT --save_location $SAVE_LOCATION
+Check the Save Location Directory: The script checks if the output file, the copied script, and the log file are correctly placed in the specified save location directory.
+
+bash
+Copy code
+echo "Checking save location directory: $SAVE_LOCATION"
+
+if [ -f "$SAVE_LOCATION/output.txt" ]; then
+    echo "Output file is correctly placed in the save location."
+else
+    echo "Output file is missing in the save location."
+    exit 1
+fi
+
+if [ -f "$SAVE_LOCATION/test_script.py" ]; then
+    echo "Script file is correctly copied to the save location."
+else
+    echo "Script file is missing in the save location."
+    exit 1
+fi
+
+LOG_FILES=($SAVE_LOCATION/*.json)
+if [ ${#LOG_FILES[@]} -gt 0 ]; then
+    echo "Log file is correctly placed in the save location."
+else
+    echo "Log file is missing in the save location."
+    exit 1
+fi
+
+echo "All files are correctly placed in the save location."
+Running the Test
+To run the test, save the above script to a file, for example, test_logging.sh, make it executable, and run it:
+
+bash
+Copy code
+chmod +x test_logging.sh
+./test_logging.sh
+This script will create a simple Python script, run it with the log wrapper, and check if the log file, the script file, and the output file are correctly placed in the specified --save_location directory.
+
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# bash test_logger.sh 
+python: can't open file '/workspace/slice-monorepo/log_wrapper.py': [Errno 2] No such file or directory
+Checking save location directory: /tmp/tmp.WUduOfxUwE/save_location
+Output file is missing in the save location.
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# bash test_logger.sh 
+Traceback (most recent call last):
+  File "/workspace/slice-monorepo/logger/log_wrapper.py", line 106, in <module>
+    main()
+  File "/workspace/slice-monorepo/logger/log_wrapper.py", line 59, in main
+    shutil.copy(script_path, save_location)
+  File "/root/miniconda3/lib/python3.12/shutil.py", line 435, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "/root/miniconda3/lib/python3.12/shutil.py", line 260, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/workspace/slice-monorepo/logger/python'
+Checking save location directory: /tmp/tmp.tiMPEE4Jcy/save_location
+Output file is missing in the save location.
+
+It is there:
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# ls
+log_wrapper.py  setup_logger.sh  test_logger.sh
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# pwd
+/workspace/slice-monorepo/logger
+
+
+Also you need to be using "log" as I would in real world for test. 
+
+You should be doing "log python test_script.py --save_location"
+
+Run the setup script in this script before continuing to next steps so you know it's setup.
+
+in fact can you just combine the setup and test script into the same bash file?
+
+#!/bin/bash
+
+mkdir "/workspace/logs" #make default logging location
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+
+
+It can be the setup and test script
+
+3/3
+
+ChatGPT
+Certainly! Below is the combined setup and test script that ensures the log command is set up correctly, creates a simple Python script, runs it with the log wrapper, and checks the specified --save_location for the expected output.
+
+Combined Setup and Test Bash Script
+bash
+Copy code
+#!/bin/bash
+
+# Create default logging location
+mkdir -p "/workspace/logs"
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/logger/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+
+# Create a temporary directory for testing
+TEST_DIR=$(mktemp -d)
+SAVE_LOCATION="$TEST_DIR/save_location"
+
+# Create the simple Python script
+PYTHON_SCRIPT="$TEST_DIR/test_script.py"
+cat <<EOF > $PYTHON_SCRIPT
+import sys
+import os
+
+def main():
+    save_location = None
+    if '--save_location' in sys.argv:
+        index = sys.argv.index('--save_location')
+        if index + 1 < len(sys.argv):
+            save_location = sys.argv[index + 1]
+
+    if save_location:
+        os.makedirs(save_location, exist_ok=True)
+        with open(os.path.join(save_location, 'output.txt'), 'w') as f:
+            f.write("This is a test file.")
+        print("Output file created in", save_location)
+    else:
+        print("No save location provided.")
+
+if __name__ == "__main__":
+    main()
+EOF
+
+# Run the Python script with the log wrapper
+log python $PYTHON_SCRIPT --save_location $SAVE_LOCATION
+
+# Check the save_location directory for the output
+echo "Checking save location directory: $SAVE_LOCATION"
+
+if [ -f "$SAVE_LOCATION/output.txt" ]; then
+    echo "Output file is correctly placed in the save location."
+else
+    echo "Output file is missing in the save location."
+    exit 1
+fi
+
+if [ -f "$SAVE_LOCATION/test_script.py" ]; then
+    echo "Script file is correctly copied to the save location."
+else
+    echo "Script file is missing in the save location."
+    exit 1
+fi
+
+LOG_FILES=($SAVE_LOCATION/*.json)
+if [ ${#LOG_FILES[@]} -gt 0 ]; then
+    echo "Log file is correctly placed in the save location."
+else
+    echo "Log file is missing in the save location."
+    exit 1
+fi
+
+echo "All files are correctly placed in the save location."
+Explanation:
+Create Default Logging Location: Ensure the default logging directory exists.
+
+bash
+Copy code
+mkdir -p "/workspace/logs"
+Set Up Log Wrapper Script: The script sets up the log wrapper script in /usr/local/bin.
+
+bash
+Copy code
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+chmod +x $TARGET_DIR/log
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+Create Simple Python Script: A simple Python script is created that writes a text file to the --save_location directory and prints a message.
+
+bash
+Copy code
+PYTHON_SCRIPT="$TEST_DIR/test_script.py"
+cat <<EOF > $PYTHON_SCRIPT
+import sys
+import os
+
+def main():
+    save_location = None
+    if '--save_location' in sys.argv:
+        index = sys.argv.index('--save_location')
+        if index + 1 < len(sys.argv):
+            save_location = sys.argv[index + 1]
+
+    if save_location:
+        os.makedirs(save_location, exist_ok=True)
+        with open(os.path.join(save_location, 'output.txt'), 'w') as f:
+            f.write("This is a test file.")
+        print("Output file created in", save_location)
+    else:
+        print("No save location provided.")
+
+if __name__ == "__main__":
+    main()
+EOF
+Run the Python Script with Log Wrapper: The script runs the Python script using the log command with the --save_location argument.
+
+bash
+Copy code
+log python $PYTHON_SCRIPT --save_location $SAVE_LOCATION
+Check the Save Location Directory: The script verifies that the output file, the copied script, and the log file are correctly placed in the specified save location directory.
+
+bash
+Copy code
+echo "Checking save location directory: $SAVE_LOCATION"
+
+if [ -f "$SAVE_LOCATION/output.txt" ]; then
+    echo "Output file is correctly placed in the save location."
+else
+    echo "Output file is missing in the save location."
+    exit 1
+fi
+
+if [ -f "$SAVE_LOCATION/test_script.py" ]; then
+    echo "Script file is correctly copied to the save location."
+else
+    echo "Script file is missing in the save location."
+    exit 1
+fi
+
+LOG_FILES=($SAVE_LOCATION/*.json)
+if [ ${#LOG_FILES[@]} -gt 0 ]; then
+    echo "Log file is correctly placed in the save location."
+else
+    echo "Log file is missing in the save location."
+    exit 1
+fi
+
+echo "All files are correctly placed in the save location."
+Running the Script
+To run the combined setup and test script, save it to a file (e.g., setup_and_test.sh), make it executable, and run it:
+
+bash
+Copy code
+chmod +x setup_and_test.sh
+./setup_and_test.sh
+This script sets up the log command, creates a simple Python script, runs it, and verifies that the log file, script file, and output file are correctly placed in the specified --save_location directory.
+
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# ls
+log_wrapper.py  setup_logger.sh  test_logger.sh
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# pwd
+/workspace/slice-monorepo/logger
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# bash setup_test_logger.sh 
+Setup complete. You can now use the 'log' command from anywhere.
+Traceback (most recent call last):
+  File "/workspace/slice-monorepo/logger/log_wrapper.py", line 106, in <module>
+    main()
+  File "/workspace/slice-monorepo/logger/log_wrapper.py", line 59, in main
+    shutil.copy(script_path, save_location)
+  File "/root/miniconda3/lib/python3.12/shutil.py", line 435, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "/root/miniconda3/lib/python3.12/shutil.py", line 260, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/workspace/slice-monorepo/logger/python'
+Checking save location directory: /tmp/tmp.VUYvOOuniP/save_location
+Output file is missing in the save location.
+ChatGPT
+The issue arises because the script path is incorrect when trying to copy it. We need to properly handle the path of the script being run, especially when it's being invoked from a command line with log.
+
+Let's correct the script path handling and ensure it captures the correct path for the Python script.
+
+Combined Setup and Test Bash Script
+Here's the updated combined setup and test script:
+
+bash
+Copy code
+#!/bin/bash
+
+# Create default logging location
+mkdir -p "/workspace/logs"
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/logger/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+
+# Create a temporary directory for testing
+TEST_DIR=$(mktemp -d)
+SAVE_LOCATION="$TEST_DIR/save_location"
+
+# Create the simple Python script
+PYTHON_SCRIPT="$TEST_DIR/test_script.py"
+cat <<EOF > $PYTHON_SCRIPT
+import sys
+import os
+
+def main():
+    save_location = None
+    if '--save_location' in sys.argv:
+        index = sys.argv.index('--save_location')
+        if index + 1 < len(sys.argv):
+            save_location = sys.argv[index + 1]
+
+    if save_location:
+        os.makedirs(save_location, exist_ok=True)
+        with open(os.path.join(save_location, 'output.txt'), 'w') as f:
+            f.write("This is a test file.")
+        print("Output file created in", save_location)
+    else:
+        print("No save location provided.")
+
+if __name__ == "__main__":
+    main()
+EOF
+
+# Run the Python script with the log wrapper
+log python $PYTHON_SCRIPT --save_location $SAVE_LOCATION
+
+# Check the save_location directory for the output
+echo "Checking save location directory: $SAVE_LOCATION"
+
+if [ -f "$SAVE_LOCATION/output.txt" ]; then
+    echo "Output file is correctly placed in the save location."
+else
+    echo "Output file is missing in the save location."
+    exit 1
+fi
+
+if [ -f "$SAVE_LOCATION/test_script.py" ]; then
+    echo "Script file is correctly copied to the save location."
+else
+    echo "Script file is missing in the save location."
+    exit 1
+fi
+
+LOG_FILES=($SAVE_LOCATION/*.json)
+if [ ${#LOG_FILES[@]} -gt 0 ]; then
+    echo "Log file is correctly placed in the save location."
+else
+    echo "Log file is missing in the save location."
+    exit 1
+fi
+
+echo "All files are correctly placed in the save location."
+Updated log_wrapper.py
+Here's the updated log_wrapper.py to correctly handle the script path:
+
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import shutil
+import signal
+import time
+
+LOG_DIR = "/workspace/logs"  # Default log directory if --save_location is not provided
+
+def log_output(logfile, process, log_entries):
+    with open(logfile, 'a') as f:
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_entry = {"timestamp": timestamp, "output": line.strip()}
+                log_entries.append(log_entry)
+                f.write(f"{timestamp} - {line}")
+                sys.stdout.write(line)
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def parse_save_location(args):
+    save_location = None
+    if '--save_location' in args:
+        index = args.index('--save_location')
+        if index + 1 < len(args):
+            save_location = args[index + 1]
+            del args[index:index + 2]  # Remove --save_location and its value from args
+    return save_location, args
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    save_location, command = parse_save_location(command)
+    
+    script_name = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    if save_location:
+        logfile = os.path.join(save_location, f"{timestamp}_{script_name}.json")
+        if not os.path.exists(save_location):
+            os.makedirs(save_location)
+        # Save a copy of the script to the save location
+        script_path = os.path.abspath(command[0])
+        shutil.copy(script_path, os.path.join(save_location, os.path.basename(script_path)))
+    else:
+        logfile = os.path.join(LOG_DIR, f"{timestamp}_{script_name}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    process = None
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log_output(logfile, process, log_data["logs"])
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    finally:
+        end_time = datetime.datetime.now()
+        runtime = end_time - start_time
+        
+        log_data.update({
+            "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "status": status,
+            "runtime": str(runtime)
+        })
+        
+        os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the default log directory exists
+        with open(logfile, 'w') as f:
+            json.dump(log_data, f, indent=4)
+        
+        print(f"\nLog saved to {logfile}")
+
+if __name__ == "__main__":
+    main()
+Running the Combined Script
+To run the combined setup and test script, save it to a file (e.g., setup_test_logger.sh), make it executable, and run it:
+
+bash
+Copy code
+chmod +x setup_test_logger.sh
+./setup_test_logger.sh
+This script sets up the log command, creates a simple Python script, runs it, and verifies that the log file, script file, and output file are correctly placed in the specified --save_location directory.
+
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# bash setup_test_logger.sh 
+Setup complete. You can now use the 'log' command from anywhere.
+Traceback (most recent call last):
+  File "/workspace/slice-monorepo/logger/log_wrapper.py", line 106, in <module>
+    main()
+  File "/workspace/slice-monorepo/logger/log_wrapper.py", line 59, in main
+    shutil.copy(script_path, os.path.join(save_location, os.path.basename(script_path)))
+  File "/root/miniconda3/lib/python3.12/shutil.py", line 435, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "/root/miniconda3/lib/python3.12/shutil.py", line 260, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/workspace/slice-monorepo/logger/python'
+Checking save location directory: /tmp/tmp.tzKifCWz31/save_location
+Output file is missing in the save location.
+
+Also, I want you to not delete the created test folder on running. I want you to put the folder right next to the script so I can see that it ran properly.
+
+2/2
+
+ChatGPT
+Sure, let's fix the issue with the script path and ensure the test directory is not deleted so you can inspect the results.
+
+Updated log_wrapper.py
+First, ensure the log_wrapper.py correctly handles the script path:
+
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import shutil
+import signal
+import time
+
+LOG_DIR = "/workspace/logs"  # Default log directory if --save_location is not provided
+
+def log_output(logfile, process, log_entries):
+    with open(logfile, 'a') as f:
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_entry = {"timestamp": timestamp, "output": line.strip()}
+                log_entries.append(log_entry)
+                f.write(f"{timestamp} - {line}")
+                sys.stdout.write(line)
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def parse_save_location(args):
+    save_location = None
+    if '--save_location' in args:
+        index = args.index('--save_location')
+        if index + 1 < len(args):
+            save_location = args[index + 1]
+            del args[index:index + 2]  # Remove --save_location and its value from args
+    return save_location, args
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    save_location, command = parse_save_location(command)
+    
+    script_name = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    if save_location:
+        logfile = os.path.join(save_location, f"{timestamp}_{script_name}.json")
+        if not os.path.exists(save_location):
+            os.makedirs(save_location)
+        # Save a copy of the script to the save location
+        script_path = os.path.abspath(command[0])
+        if os.path.isfile(script_path):
+            shutil.copy(script_path, os.path.join(save_location, os.path.basename(script_path)))
+        else:
+            print(f"Script file not found: {script_path}")
+    else:
+        logfile = os.path.join(LOG_DIR, f"{timestamp}_{script_name}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    process = None
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log_output(logfile, process, log_data["logs"])
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    finally:
+        end_time = datetime.datetime.now()
+        runtime = end_time - start_time
+        
+        log_data.update({
+            "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "status": status,
+            "runtime": str(runtime)
+        })
+        
+        os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the default log directory exists
+        with open(logfile, 'w') as f:
+            json.dump(log_data, f, indent=4)
+        
+        print(f"\nLog saved to {logfile}")
+
+if __name__ == "__main__":
+    main()
+Combined Setup and Test Bash Script
+Here's the updated combined setup and test script that places the test folder next to the script and doesn't delete it:
+
+bash
+Copy code
+#!/bin/bash
+
+# Create default logging location
+mkdir -p "/workspace/logs"
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/logger/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+
+# Create a directory for testing next to the script
+TEST_DIR="/workspace/slice-monorepo/logger/test_dir"
+mkdir -p $TEST_DIR
+SAVE_LOCATION="$TEST_DIR/save_location"
+
+# Create the simple Python script
+PYTHON_SCRIPT="$TEST_DIR/test_script.py"
+cat <<EOF > $PYTHON_SCRIPT
+import sys
+import os
+
+def main():
+    save_location = None
+    if '--save_location' in sys.argv:
+        index = sys.argv.index('--save_location')
+        if index + 1 < len(sys.argv):
+            save_location = sys.argv[index + 1]
+
+    if save_location:
+        os.makedirs(save_location, exist_ok=True)
+        with open(os.path.join(save_location, 'output.txt'), 'w') as f:
+            f.write("This is a test file.")
+        print("Output file created in", save_location)
+    else:
+        print("No save location provided.")
+
+if __name__ == "__main__":
+    main()
+EOF
+
+# Run the Python script with the log wrapper
+log python $PYTHON_SCRIPT --save_location $SAVE_LOCATION
+
+# Check the save_location directory for the output
+echo "Checking save location directory: $SAVE_LOCATION"
+
+if [ -f "$SAVE_LOCATION/output.txt" ]; then
+    echo "Output file is correctly placed in the save location."
+else
+    echo "Output file is missing in the save location."
+    exit 1
+fi
+
+if [ -f "$SAVE_LOCATION/test_script.py" ]; then
+    echo "Script file is correctly copied to the save location."
+else
+    echo "Script file is missing in the save location."
+    exit 1
+fi
+
+LOG_FILES=($SAVE_LOCATION/*.json)
+if [ ${#LOG_FILES[@]} -gt 0 ]; then
+    echo "Log file is correctly placed in the save location."
+else
+    echo "Log file is missing in the save location."
+    exit 1
+fi
+
+echo "All files are correctly placed in the save location."
+Running the Combined Script
+To run the combined setup and test script, save it to a file (e.g., setup_test_logger.sh), make it executable, and run it:
+
+bash
+Copy code
+chmod +x setup_test_logger.sh
+./setup_test_logger.sh
+This script sets up the log command, creates a simple Python script, runs it, and verifies that the log file, script file, and output file are correctly placed in the specified --save_location directory, and places the test directory next to the script so you can inspect the results.
+
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# bash setup_test_logger.sh 
+Setup complete. You can now use the 'log' command from anywhere.
+Script file not found: /workspace/slice-monorepo/logger/python
+No save location provided.
+
+Log saved to /workspace/slice-monorepo/logger/test_dir/save_location/20240622_182334_python.json
+Checking save location directory: /workspace/slice-monorepo/logger/test_dir/save_location
+Output file is missing in the save location.
+
+
+Script did ok.
+
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# tree test_dir/
+test_dir/
+├── save_location
+│   └── 20240622_182334_python.json
+└── test_script.py
+
+1 directory, 2 files
+ChatGPT
+The issue is that the script file path is not being correctly identified and copied. Let's fix the path handling to ensure that the script file is properly found and copied.
+
+Here's the updated log_wrapper.py:
+
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import shutil
+import signal
+import time
+
+LOG_DIR = "/workspace/logs"  # Default log directory if --save_location is not provided
+
+def log_output(logfile, process, log_entries):
+    with open(logfile, 'a') as f:
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_entry = {"timestamp": timestamp, "output": line.strip()}
+                log_entries.append(log_entry)
+                f.write(f"{timestamp} - {line}")
+                sys.stdout.write(line)
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def parse_save_location(args):
+    save_location = None
+    if '--save_location' in args:
+        index = args.index('--save_location')
+        if index + 1 < len(args):
+            save_location = args[index + 1]
+            del args[index:index + 2]  # Remove --save_location and its value from args
+    return save_location, args
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    save_location, command = parse_save_location(command)
+    
+    script_name = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    if save_location:
+        logfile = os.path.join(save_location, f"{timestamp}_{script_name}.json")
+        if not os.path.exists(save_location):
+            os.makedirs(save_location)
+        # Save a copy of the script to the save location
+        script_path = os.path.abspath(command[0])
+        if os.path.isfile(script_path):
+            shutil.copy(script_path, os.path.join(save_location, os.path.basename(script_path)))
+        else:
+            print(f"Script file not found: {script_path}")
+    else:
+        logfile = os.path.join(LOG_DIR, f"{timestamp}_{script_name}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    process = None
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log_output(logfile, process, log_data["logs"])
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    finally:
+        end_time = datetime.datetime.now()
+        runtime = end_time - start_time
+        
+        log_data.update({
+            "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "status": status,
+            "runtime": str(runtime)
+        })
+        
+        os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the default log directory exists
+        with open(logfile, 'w') as f:
+            json.dump(log_data, f, indent=4)
+        
+        print(f"\nLog saved to {logfile}")
+
+if __name__ == "__main__":
+    main()
+Updated Combined Setup and Test Bash Script
+Here's the updated combined setup and test script:
+
+bash
+Copy code
+#!/bin/bash
+
+# Create default logging location
+mkdir -p "/workspace/logs"
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/logger/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+
+# Create a directory for testing next to the script
+TEST_DIR="/workspace/slice-monorepo/logger/test_dir"
+mkdir -p $TEST_DIR
+SAVE_LOCATION="$TEST_DIR/save_location"
+
+# Create the simple Python script
+PYTHON_SCRIPT="$TEST_DIR/test_script.py"
+cat <<EOF > $PYTHON_SCRIPT
+import sys
+import os
+
+def main():
+    save_location = None
+    if '--save_location' in sys.argv:
+        index = sys.argv.index('--save_location')
+        if index + 1 < len(sys.argv):
+            save_location = sys.argv[index + 1]
+
+    if save_location:
+        os.makedirs(save_location, exist_ok=True)
+        with open(os.path.join(save_location, 'output.txt'), 'w') as f:
+            f.write("This is a test file.")
+        print("Output file created in", save_location)
+    else:
+        print("No save location provided.")
+
+if __name__ == "__main__":
+    main()
+EOF
+
+# Run the Python script with the log wrapper
+log python $PYTHON_SCRIPT --save_location $SAVE_LOCATION
+
+# Check the save_location directory for the output
+echo "Checking save location directory: $SAVE_LOCATION"
+
+if [ -f "$SAVE_LOCATION/output.txt" ]; then
+    echo "Output file is correctly placed in the save location."
+else
+    echo "Output file is missing in the save location."
+    exit 1
+fi
+
+if [ -f "$SAVE_LOCATION/test_script.py" ]; then
+    echo "Script file is correctly copied to the save location."
+else
+    echo "Script file is missing in the save location."
+    exit 1
+fi
+
+LOG_FILES=($SAVE_LOCATION/*.json)
+if [ ${#LOG_FILES[@]} -gt 0 ]; then
+    echo "Log file is correctly placed in the save location."
+else
+    echo "Log file is missing in the save location."
+    exit 1
+fi
+
+echo "All files are correctly placed in the save location."
+Running the Combined Script
+To run the combined setup and test script, save it to a file (e.g., setup_test_logger.sh), make it executable, and run it:
+
+bash
+Copy code
+chmod +x setup_test_logger.sh
+./setup_test_logger.sh
+This script sets up the log command, creates a simple Python script, runs it, and verifies that the log file, script file, and output file are correctly placed in the specified --save_location directory, and places the test directory next to the script so you can inspect the results.
+
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# bash setup_test_logger.sh 
+Setup complete. You can now use the 'log' command from anywhere.
+Script file not found: /workspace/slice-monorepo/logger/python
+No save location provided.
+
+Log saved to /workspace/slice-monorepo/logger/test_dir/save_location/20240622_182712_python.json
+Checking save location directory: /workspace/slice-monorepo/logger/test_dir/save_location
+Output file is missing in the save location.
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# tree test_dir/
+test_dir/
+├── save_location
+│   └── 20240622_182712_python.json
+└── test_script.py
+
+1 directory, 2 files
+
+
+So it's important that all of the data saved from the logger be kept under a "logs" folder in the save location. the idea being a ML experiment will run and this will be kept in the same folder as the results but tucked away in a logs folder to keep it simple looking.
+ChatGPT
+Understood. Let's update the script to ensure all log data is saved under a logs folder within the specified --save_location.
+
+Updated log_wrapper.py
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import shutil
+import signal
+import time
+
+LOG_DIR = "/workspace/logs"  # Default log directory if --save_location is not provided
+
+def log_output(logfile, process, log_entries):
+    with open(logfile, 'a') as f:
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_entry = {"timestamp": timestamp, "output": line.strip()}
+                log_entries.append(log_entry)
+                f.write(f"{timestamp} - {line}")
+                sys.stdout.write(line)
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def parse_save_location(args):
+    save_location = None
+    if '--save_location' in args:
+        index = args.index('--save_location')
+        if index + 1 < len(args):
+            save_location = args[index + 1]
+            del args[index:index + 2]  # Remove --save_location and its value from args
+    return save_location, args
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    save_location, command = parse_save_location(command)
+    
+    script_name = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    if save_location:
+        logs_dir = os.path.join(save_location, 'logs')
+        logfile = os.path.join(logs_dir, f"{timestamp}_{script_name}.json")
+        if not os.path.exists(logs_dir):
+            os.makedirs(logs_dir)
+        # Save a copy of the script to the save location
+        script_path = os.path.abspath(command[0])
+        if os.path.isfile(script_path):
+            shutil.copy(script_path, os.path.join(logs_dir, os.path.basename(script_path)))
+        else:
+            print(f"Script file not found: {script_path}")
+    else:
+        logfile = os.path.join(LOG_DIR, f"{timestamp}_{script_name}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    process = None
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log_output(logfile, process, log_data["logs"])
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    finally:
+        end_time = datetime.datetime.now()
+        runtime = end_time - start_time
+        
+        log_data.update({
+            "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "status": status,
+            "runtime": str(runtime)
+        })
+        
+        os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the default log directory exists
+        with open(logfile, 'w') as f:
+            json.dump(log_data, f, indent=4)
+        
+        print(f"\nLog saved to {logfile}")
+
+if __name__ == "__main__":
+    main()
+Updated Combined Setup and Test Bash Script
+Here's the updated combined setup and test script that ensures the logs are stored within a logs folder inside the save location:
+
+bash
+Copy code
+#!/bin/bash
+
+# Create default logging location
+mkdir -p "/workspace/logs"
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/logger/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+
+# Create a directory for testing next to the script
+TEST_DIR="/workspace/slice-monorepo/logger/test_dir"
+mkdir -p $TEST_DIR
+SAVE_LOCATION="$TEST_DIR/save_location"
+
+# Create the simple Python script
+PYTHON_SCRIPT="$TEST_DIR/test_script.py"
+cat <<EOF > $PYTHON_SCRIPT
+import sys
+import os
+
+def main():
+    save_location = None
+    if '--save_location' in sys.argv:
+        index = sys.argv.index('--save_location')
+        if index + 1 < len(sys.argv):
+            save_location = sys.argv[index + 1]
+
+    if save_location:
+        os.makedirs(save_location, exist_ok=True)
+        with open(os.path.join(save_location, 'output.txt'), 'w') as f:
+            f.write("This is a test file.")
+        print("Output file created in", save_location)
+    else:
+        print("No save location provided.")
+
+if __name__ == "__main__":
+    main()
+EOF
+
+# Run the Python script with the log wrapper
+log python $PYTHON_SCRIPT --save_location $SAVE_LOCATION
+
+# Check the save_location directory for the output
+echo "Checking save location directory: $SAVE_LOCATION"
+
+if [ -f "$SAVE_LOCATION/output.txt" ]; then
+    echo "Output file is correctly placed in the save location."
+else
+    echo "Output file is missing in the save location."
+    exit 1
+fi
+
+if [ -f "$SAVE_LOCATION/logs/test_script.py" ]; then
+    echo "Script file is correctly copied to the save location logs folder."
+else
+    echo "Script file is missing in the save location logs folder."
+    exit 1
+fi
+
+LOG_FILES=($SAVE_LOCATION/logs/*.json)
+if [ ${#LOG_FILES[@]} -gt 0 ]; then
+    echo "Log file is correctly placed in the save location logs folder."
+else
+    echo "Log file is missing in the save location logs folder."
+    exit 1
+fi
+
+echo "All files are correctly placed in the save location logs folder."
+Running the Combined Script
+To run the combined setup and test script, save it to a file (e.g., setup_test_logger.sh), make it executable, and run it:
+
+bash
+Copy code
+chmod +x setup_test_logger.sh
+./setup_test_logger.sh
+This script sets up the log command, creates a simple Python script, runs it, and verifies that the log file, script file, and output file are correctly placed in the specified --save_location directory inside a logs folder, and places the test directory next to the script so you can inspect the results.
+
+1. the test script should also be saved under the logs folder. 
+
+Final structure should be something like 
+
+save_location:
+- experiment data
+- logs
+    -> json log dile
+    -> script
+
+2. I also don't understand how this is not seeing the save location. Can you start printing out debugs to find the issue?
+
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# bash setup_test_logger.sh 
+Setup complete. You can now use the 'log' command from anywhere.
+Script file not found: /workspace/slice-monorepo/logger/python
+No save location provided.
+
+Log saved to /workspace/slice-monorepo/logger/test_dir/save_location/logs/20240622_182925_python.json
+Checking save location directory: /workspace/slice-monorepo/logger/test_dir/save_location
+Output file is missing in the save location.
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# tree test_dir/
+test_dir/
+├── save_location
+│   └── logs
+│       └── 20240622_182925_python.json
+└── test_script.py
+
+2 directories, 2 files
+ChatGPT
+Let's enhance the logging for debugging purposes and ensure the test script is saved under the logs folder within the save location. Here is the updated log_wrapper.py with additional debug print statements and the combined setup and test bash script:
+
+Updated log_wrapper.py
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import shutil
+import signal
+import time
+
+LOG_DIR = "/workspace/logs"  # Default log directory if --save_location is not provided
+
+def log_output(logfile, process, log_entries):
+    with open(logfile, 'a') as f:
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_entry = {"timestamp": timestamp, "output": line.strip()}
+                log_entries.append(log_entry)
+                f.write(f"{timestamp} - {line}")
+                sys.stdout.write(line)
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def parse_save_location(args):
+    save_location = None
+    if '--save_location' in args:
+        index = args.index('--save_location')
+        if index + 1 < len(args):
+            save_location = args[index + 1]
+            del args[index:index + 2]  # Remove --save_location and its value from args
+    return save_location, args
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    save_location, command = parse_save_location(command)
+    
+    script_name = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    if save_location:
+        logs_dir = os.path.join(save_location, 'logs')
+        logfile = os.path.join(logs_dir, f"{timestamp}_{script_name}.json")
+        if not os.path.exists(logs_dir):
+            os.makedirs(logs_dir)
+        # Save a copy of the script to the save location
+        script_path = os.path.abspath(command[0])
+        print(f"Debug: script_path = {script_path}")
+        print(f"Debug: save_location = {save_location}")
+        if os.path.isfile(script_path):
+            shutil.copy(script_path, os.path.join(logs_dir, os.path.basename(script_path)))
+        else:
+            print(f"Script file not found: {script_path}")
+    else:
+        logfile = os.path.join(LOG_DIR, f"{timestamp}_{script_name}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    process = None
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log_output(logfile, process, log_data["logs"])
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    finally:
+        end_time = datetime.datetime.now()
+        runtime = end_time - start_time
+        
+        log_data.update({
+            "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "status": status,
+            "runtime": str(runtime)
+        })
+        
+        os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the default log directory exists
+        with open(logfile, 'w') as f:
+            json.dump(log_data, f, indent=4)
+        
+        print(f"\nLog saved to {logfile}")
+
+if __name__ == "__main__":
+    main()
+Updated Combined Setup and Test Bash Script
+Here's the updated combined setup and test script:
+
+bash
+Copy code
+#!/bin/bash
+
+# Create default logging location
+mkdir -p "/workspace/logs"
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/logger/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+
+# Create a directory for testing next to the script
+TEST_DIR="/workspace/slice-monorepo/logger/test_dir"
+mkdir -p $TEST_DIR
+SAVE_LOCATION="$TEST_DIR/save_location"
+
+# Create the simple Python script
+PYTHON_SCRIPT="$TEST_DIR/test_script.py"
+cat <<EOF > $PYTHON_SCRIPT
+import sys
+import os
+
+def main():
+    save_location = None
+    if '--save_location' in sys.argv:
+        index = sys.argv.index('--save_location')
+        if index + 1 < len(sys.argv):
+            save_location = sys.argv[index + 1]
+        print(f"Debug: Inside test script, save_location = {save_location}")
+
+    if save_location:
+        os.makedirs(save_location, exist_ok=True)
+        with open(os.path.join(save_location, 'output.txt'), 'w') as f:
+            f.write("This is a test file.")
+        print("Output file created in", save_location)
+    else:
+        print("No save location provided.")
+
+if __name__ == "__main__":
+    main()
+EOF
+
+# Run the Python script with the log wrapper
+log python $PYTHON_SCRIPT --save_location $SAVE_LOCATION
+
+# Check the save_location directory for the output
+echo "Checking save location directory: $SAVE_LOCATION"
+
+if [ -f "$SAVE_LOCATION/output.txt" ]; then
+    echo "Output file is correctly placed in the save location."
+else
+    echo "Output file is missing in the save location."
+    exit 1
+fi
+
+if [ -f "$SAVE_LOCATION/logs/test_script.py" ]; then
+    echo "Script file is correctly copied to the save location logs folder."
+else
+    echo "Script file is missing in the save location logs folder."
+    exit 1
+fi
+
+LOG_FILES=($SAVE_LOCATION/logs/*.json)
+if [ ${#LOG_FILES[@]} -gt 0 ]; then
+    echo "Log file is correctly placed in the save location logs folder."
+else
+    echo "Log file is missing in the save location logs folder."
+    exit 1
+fi
+
+echo "All files are correctly placed in the save location logs folder."
+Running the Combined Script
+To run the combined setup and test script, save it to a file (e.g., setup_test_logger.sh), make it executable, and run it:
+
+bash
+Copy code
+chmod +x setup_test_logger.sh
+./setup_test_logger.sh
+This script sets up the log command, creates a simple Python script, runs it, and verifies that the log file, script file, and output file are correctly placed in the specified --save_location directory inside a logs folder. Additionally, debug print statements have been added to help identify where the issue might be occurring. The test directory will be placed next to the script so you can inspect the results.
+
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# bash setup_test_logger.sh 
+Setup complete. You can now use the 'log' command from anywhere.
+Debug: script_path = /workspace/slice-monorepo/logger/python
+Debug: save_location = /workspace/slice-monorepo/logger/test_dir/save_location
+Script file not found: /workspace/slice-monorepo/logger/python
+No save location provided.
+
+Log saved to /workspace/slice-monorepo/logger/test_dir/save_location/logs/20240622_183308_python.json
+Checking save location directory: /workspace/slice-monorepo/logger/test_dir/save_location
+Output file is missing in the save location.
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# tree test_dir/
+test_dir/
+├── save_location
+│   └── logs
+│       └── 20240622_183308_python.json
+└── test_script.py
+
+2 directories, 2 files
+
+
+Also the test_script.py needs to be saved under the logs folder.
+ChatGPT
+The issue stems from the script path being misidentified. The command being passed to the log wrapper script is not correctly resolving the script name. Let's ensure the command passed to the subprocess includes the correct path to the script.
+
+Here is the updated log_wrapper.py and combined setup and test bash script:
+
+Updated log_wrapper.py
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import shutil
+import signal
+import time
+
+LOG_DIR = "/workspace/logs"  # Default log directory if --save_location is not provided
+
+def log_output(logfile, process, log_entries):
+    with open(logfile, 'a') as f:
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_entry = {"timestamp": timestamp, "output": line.strip()}
+                log_entries.append(log_entry)
+                f.write(f"{timestamp} - {line}")
+                sys.stdout.write(line)
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def parse_save_location(args):
+    save_location = None
+    if '--save_location' in args:
+        index = args.index('--save_location')
+        if index + 1 < len(args):
+            save_location = args[index + 1]
+            del args[index:index + 2]  # Remove --save_location and its value from args
+    return save_location, args
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    save_location, command = parse_save_location(command)
+    
+    script_name = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    if save_location:
+        logs_dir = os.path.join(save_location, 'logs')
+        logfile = os.path.join(logs_dir, f"{timestamp}_{script_name}.json")
+        if not os.path.exists(logs_dir):
+            os.makedirs(logs_dir)
+        # Save a copy of the script to the save location
+        script_path = os.path.abspath(command[0])
+        print(f"Debug: script_path = {script_path}")
+        print(f"Debug: save_location = {save_location}")
+        if os.path.isfile(script_path):
+            shutil.copy(script_path, os.path.join(logs_dir, os.path.basename(script_path)))
+            # Update the command to use the absolute path to the script
+            command[0] = script_path
+        else:
+            print(f"Script file not found: {script_path}")
+    else:
+        logfile = os.path.join(LOG_DIR, f"{timestamp}_{script_name}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    process = None
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log_output(logfile, process, log_data["logs"])
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    finally:
+        end_time = datetime.datetime.now()
+        runtime = end_time - start_time
+        
+        log_data.update({
+            "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "status": status,
+            "runtime": str(runtime)
+        })
+        
+        os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the default log directory exists
+        with open(logfile, 'w') as f:
+            json.dump(log_data, f, indent=4)
+        
+        print(f"\nLog saved to {logfile}")
+
+if __name__ == "__main__":
+    main()
+Updated Combined Setup and Test Bash Script
+Here's the updated combined setup and test script:
+
+bash
+Copy code
+#!/bin/bash
+
+# Create default logging location
+mkdir -p "/workspace/logs"
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/logger/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+
+# Create a directory for testing next to the script
+TEST_DIR="/workspace/slice-monorepo/logger/test_dir"
+mkdir -p $TEST_DIR
+SAVE_LOCATION="$TEST_DIR/save_location"
+
+# Create the simple Python script
+PYTHON_SCRIPT="$TEST_DIR/test_script.py"
+cat <<EOF > $PYTHON_SCRIPT
+import sys
+import os
+
+def main():
+    save_location = None
+    if '--save_location' in sys.argv:
+        index = sys.argv.index('--save_location')
+        if index + 1 < len(sys.argv):
+            save_location = sys.argv[index + 1]
+        print(f"Debug: Inside test script, save_location = {save_location}")
+
+    if save_location:
+        os.makedirs(save_location, exist_ok=True)
+        with open(os.path.join(save_location, 'output.txt'), 'w') as f:
+            f.write("This is a test file.")
+        print("Output file created in", save_location)
+    else:
+        print("No save location provided.")
+
+if __name__ == "__main__":
+    main()
+EOF
+
+# Run the Python script with the log wrapper
+log python $PYTHON_SCRIPT --save_location $SAVE_LOCATION
+
+# Check the save_location directory for the output
+echo "Checking save location directory: $SAVE_LOCATION"
+
+if [ -f "$SAVE_LOCATION/output.txt" ]; then
+    echo "Output file is correctly placed in the save location."
+else
+    echo "Output file is missing in the save location."
+    exit 1
+fi
+
+if [ -f "$SAVE_LOCATION/logs/test_script.py" ]; then
+    echo "Script file is correctly copied to the save location logs folder."
+else
+    echo "Script file is missing in the save location logs folder."
+    exit 1
+fi
+
+LOG_FILES=($SAVE_LOCATION/logs/*.json)
+if [ ${#LOG_FILES[@]} -gt 0 ]; then
+    echo "Log file is correctly placed in the save location logs folder."
+else
+    echo "Log file is missing in the save location logs folder."
+    exit 1
+fi
+
+echo "All files are correctly placed in the save location logs folder."
+Running the Combined Script
+To run the combined setup and test script, save it to a file (e.g., setup_test_logger.sh), make it executable, and run it:
+
+bash
+Copy code
+chmod +x setup_test_logger.sh
+./setup_test_logger.sh
+This script sets up the log command, creates a simple Python script, runs it, and verifies that the log file, script file, and output file are correctly placed in the specified --save_location directory inside a logs folder. Additionally, debug print statements have been added to help identify where the issue might be occurring. The test directory will be placed next to the script so you can inspect the results.
+
+1. The test_script.py must be saved under logs alongside the .json file not under save_location.
+
+2. Error:
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# bash setup_test_logger.sh 
+Setup complete. You can now use the 'log' command from anywhere.
+Debug: script_path = /workspace/slice-monorepo/logger/python
+Debug: save_location = /workspace/slice-monorepo/logger/test_dir/save_location
+Script file not found: /workspace/slice-monorepo/logger/python
+No save location provided.
+
+Log saved to /workspace/slice-monorepo/logger/test_dir/save_location/logs/20240622_183543_python.json
+Checking save location directory: /workspace/slice-monorepo/logger/test_dir/save_location
+Output file is missing in the save location.
+(base) root@79b5b36ca583:/workspace/slice-monorepo/logger# tree test_dir/
+test_dir/
+├── save_location
+│   └── logs
+│       └── 20240622_183543_python.json
+└── test_script.py
+
+2 directories, 2 files
+
+Provide more debug statements printed out in the bash or python
+ChatGPT
+Let's improve the debug statements and ensure the script file is correctly saved under the logs folder inside the save_location.
+
+Updated log_wrapper.py
+We will add more debug statements and correct the path handling:
+
+python
+Copy code
+import subprocess
+import sys
+import datetime
+import json
+import os
+import shutil
+import signal
+import time
+
+LOG_DIR = "/workspace/logs"  # Default log directory if --save_location is not provided
+
+def log_output(logfile, process, log_entries):
+    with open(logfile, 'a') as f:
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_entry = {"timestamp": timestamp, "output": line.strip()}
+                log_entries.append(log_entry)
+                f.write(f"{timestamp} - {line}")
+                sys.stdout.write(line)
+
+def get_gpu_utilization():
+    try:
+        result = subprocess.run(['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        gpu_util = result.stdout.strip()
+        return gpu_util
+    except Exception as e:
+        return f"Failed to get GPU utilization: {e}"
+
+def parse_save_location(args):
+    save_location = None
+    if '--save_location' in args:
+        index = args.index('--save_location')
+        if index + 1 < len(args):
+            save_location = args[index + 1]
+            del args[index:index + 2]  # Remove --save_location and its value from args
+    return save_location, args
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python log_wrapper.py <command> [args...]")
+        sys.exit(1)
+
+    command = sys.argv[1:]
+    save_location, command = parse_save_location(command)
+    
+    script_name = os.path.basename(command[0]).split('.')[0]
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    if save_location:
+        logs_dir = os.path.join(save_location, 'logs')
+        logfile = os.path.join(logs_dir, f"{timestamp}_{script_name}.json")
+        if not os.path.exists(logs_dir):
+            os.makedirs(logs_dir)
+        # Save a copy of the script to the save location
+        script_path = os.path.abspath(command[0])
+        print(f"Debug: script_path = {script_path}")
+        print(f"Debug: save_location = {save_location}")
+        if os.path.isfile(script_path):
+            shutil.copy(script_path, os.path.join(logs_dir, os.path.basename(script_path)))
+            # Update the command to use the absolute path to the script
+            command[0] = script_path
+            print(f"Debug: Updated command = {command}")
+        else:
+            print(f"Script file not found: {script_path}")
+    else:
+        logfile = os.path.join(LOG_DIR, f"{timestamp}_{script_name}.json")
+    
+    start_time = datetime.datetime.now()
+    
+    log_data = {
+        "command": ' '.join(command),
+        "start_time": start_time.strftime('%Y-%m-%d %H:%M:%S'),
+        "gpu_utilization": get_gpu_utilization(),
+        "logs": []
+    }
+    
+    process = None
+    try:
+        print(f"Debug: Running command = {command}")
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        log_output(logfile, process, log_data["logs"])
+        process.wait()
+        
+        if process.returncode == 0:
+            status = "Success"
+        else:
+            status = f"Failed with return code {process.returncode}"
+            
+    except KeyboardInterrupt:
+        if process:
+            process.terminate()
+        status = "User canceled (KeyboardInterrupt)"
+    except Exception as e:
+        status = f"Failed with exception: {e}"
+    finally:
+        end_time = datetime.datetime.now()
+        runtime = end_time - start_time
+        
+        log_data.update({
+            "end_time": end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "status": status,
+            "runtime": str(runtime)
+        })
+        
+        os.makedirs(LOG_DIR, exist_ok=True)  # Ensure the default log directory exists
+        with open(logfile, 'w') as f:
+            json.dump(log_data, f, indent=4)
+        
+        print(f"\nLog saved to {logfile}")
+
+if __name__ == "__main__":
+    main()
+Updated Combined Setup and Test Bash Script
+We'll also add more debug statements in the bash script:
+
+bash
+Copy code
+#!/bin/bash
+
+# Create default logging location
+mkdir -p "/workspace/logs"
+
+# Define the path to the log wrapper script
+LOG_WRAPPER_PATH="/workspace/slice-monorepo/logger/log_wrapper.py"
+
+# Define the target directory for the bash wrapper script
+TARGET_DIR="/usr/local/bin"
+
+# Create the bash wrapper script
+echo "#!/bin/bash" > $TARGET_DIR/log
+echo "python $LOG_WRAPPER_PATH \"\$@\"" >> $TARGET_DIR/log
+
+# Ensure the bash wrapper script is executable
+chmod +x $TARGET_DIR/log
+
+# Add /usr/local/bin to PATH if it's not already in PATH
+if [[ ":$PATH:" != *":$TARGET_DIR:"* ]]; then
+  echo "export PATH=\$PATH:$TARGET_DIR" >> ~/.bashrc
+  source ~/.bashrc
+fi
+
+echo "Setup complete. You can now use the 'log' command from anywhere."
+
+# Create a directory for testing next to the script
+TEST_DIR="/workspace/slice-monorepo/logger/test_dir"
+mkdir -p $TEST_DIR
+SAVE_LOCATION="$TEST_DIR/save_location"
+
+# Create the simple Python script
+PYTHON_SCRIPT="$TEST_DIR/test_script.py"
+cat <<EOF > $PYTHON_SCRIPT
+import sys
+import os
+
+def main():
+    save_location = None
+    if '--save_location' in sys.argv:
+        index = sys.argv.index('--save_location')
+        if index + 1 < len(sys.argv):
+            save_location = sys.argv[index + 1]
+        print(f"Debug: Inside test script, save_location = {save_location}")
+
+    if save_location:
+        os.makedirs(save_location, exist_ok=True)
+        with open(os.path.join(save_location, 'output.txt'), 'w') as f:
+            f.write("This is a test file.")
+        print("Output file created in", save_location)
+    else:
+        print("No save location provided.")
+
+if __name__ == "__main__":
+    main()
+EOF
+
+# Run the Python script with the log wrapper
+echo "Debug: Running log command with save_location = $SAVE_LOCATION"
+log python $PYTHON_SCRIPT --save_location $SAVE_LOCATION
+
+# Check the save_location directory for the output
+echo "Checking save location directory: $SAVE_LOCATION"
+
+if [ -f "$SAVE_LOCATION/output.txt" ]; then
+    echo "Output file is correctly placed in the save location."
+else
+    echo "Output file is missing in the save location."
+    exit 1
+fi
+
+if [ -f "$SAVE_LOCATION/logs/test_script.py" ]; then
+    echo "Script file is correctly copied to the save location logs folder."
+else
+    echo "Script file is missing in the save location logs folder."
+    exit 1
+fi
+
+LOG_FILES=($SAVE_LOCATION/logs/*.json)
+if [ ${#LOG_FILES[@]} -gt 0 ]; then
+    echo "Log file is correctly placed in the save location logs folder."
+else
+    echo "Log file is missing in the save location logs folder."
+    exit 1
+fi
+
+echo "All files are correctly placed in the save location logs folder."
+Running the Combined Script
+To run the combined setup and test script, save it to a file (e.g., setup_test_logger.sh), make it executable, and run it:
+
+bash
+Copy code
+chmod +x setup_test_logger.sh
+./setup_test_logger.sh
+This script sets up the log command, creates a simple Python script, runs it, and verifies that the log file, script file, and output file are correctly placed in the specified --save_location directory inside a logs folder. Additional debug print statements have been added to help identify where the issue might be occurring. The test directory will be placed next to the script so you can inspect the results.

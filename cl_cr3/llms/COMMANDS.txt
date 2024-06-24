@@ -1,0 +1,8 @@
+bash conda.sh
+
+conda create -n pythia_env python=3.8
+conda activate pythia_env
+
+
+pip install torch torchvision torchaudio pynvml transformers datasets matplotlib accelerate
+

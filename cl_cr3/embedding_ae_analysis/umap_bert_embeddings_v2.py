@@ -218,7 +218,7 @@ def main(config):
 if __name__ == "__main__":
     config = {
         'experiment_name': 'high_accuarcy_dbscan',
-        'embeddings_path': 'utterance_embeddings_ds2.h5',
+        'embeddings_path': 'utterance_embeddings_ds1.h5',
         'model_path': 'trained_autoencoder.pth',
         'batch_size': 32768
     }

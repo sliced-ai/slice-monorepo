@@ -279,9 +279,9 @@ def main(config):
 
 if __name__ == "__main__":
     config = {
-        'experiment_name': 'your_experiment_name',  # Update this with your experiment name
-        'embeddings_path': 'utterance_embeddings.h5',
-        'model_path': 'trained_autoencoder_old.pth',
+        'experiment_name': 'high_accuracy_v1_visuals.',  # Update this with your experiment name
+        'embeddings_path': 'utterance_embeddings_ds1.h5',
+        'model_path': 'trained_autoencoder.pth',
         'batch_size': 32768
     }
     main(config)
