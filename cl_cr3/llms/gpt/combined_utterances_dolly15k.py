@@ -15,10 +15,10 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 TARGET_NAME = "LAURA"
 FOLDER_PATH = '/workspace/slice-monorepo/cl_cr3/aligneddata'
 MODEL_NAME = "EleutherAI/pythia-70m"
-EPOCHS = 2
+EPOCHS = 10
 BATCH_SIZE = 30
 LEARNING_RATE = 1e-4
-DATA_SIZE = 5000  # Overall dataset size
+DATA_SIZE = 15000  # Overall dataset size
 RATIO = 0.5  # Ratio for aligneddata and dolly15k
 SAVE_FOLDER = "results"
 
