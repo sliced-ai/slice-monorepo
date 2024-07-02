@@ -5,3 +5,13 @@
 *.h5
 .ipynb_checkpoints
 cl_cr3/embedding_ae_analysis/utterance_embeddings_ds1.h5
+cl_cr3/pipeline/experiments/MyExperiment/iteration_5/training/LAURA_1/model.safetensors
+cl_cr3/pipeline/experiments/MyExperiment/iteration_5/ae_analysis/trained_autoencoder.pth
+cl_cr3/pipeline/experiments/MyExperiment/iteration_4/training/LAURA_1/model.safetensors
+cl_cr3/pipeline/experiments/MyExperiment/iteration_4/ae_analysis/trained_autoencoder.pth
+cl_cr3/pipeline/experiments/MyExperiment/iteration_3/training/LAURA_1/model.safetensors
+cl_cr3/pipeline/experiments/MyExperiment/iteration_3/ae_analysis/trained_autoencoder.pth
+cl_cr3/pipeline/experiments/MyExperiment/iteration_2/training/LAURA_1/model.safetensors
+cl_cr3/pipeline/experiments/MyExperiment/iteration_2/ae_analysis/trained_autoencoder.pth
+cl_cr3/pipeline/experiments/MyExperiment/iteration_1/training/LAURA_1/model.safetensors
+cl_cr3/pipeline/experiments/MyExperiment/iteration_1/ae_analysis/trained_autoencoder.pth

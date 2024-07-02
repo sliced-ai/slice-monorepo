@@ -3,9 +3,7 @@ import os
 import torch
 from transformers import GPTNeoXForCausalLM, AutoTokenizer
 from torch.utils.data import DataLoader, Dataset, random_split
-import datetime
 import numpy as np
-import random
 import time
 import matplotlib.pyplot as plt
 from datasets import load_dataset
@@ -47,7 +45,7 @@ def process_folder(folder_path, target_name, num_utterance_pairs):
         for file in files:
             if file.endswith('.json'):
                 file_path = os.path.join(root, file)
-                with open(file_path) as json_file:
+                with open(file_path, encoding='utf-8') as json_file:
                     data = json.load(json_file)
                     for document in data:
                         turns = document['TURNS']
@@ -69,6 +67,12 @@ def merge_datasets(aligneddata, dolly15k, ratio, total_size):
     merged_data = aligneddata[:len_aligneddata] + dolly15k[:len_dolly15k]
     return merged_data, len_aligneddata, len_dolly15k
 
+# Collate function for DataLoader
+def collate_fn(batch):
+    input_ids = torch.cat([item['input_ids'] for item in batch], dim=0)
+    attention_mask = torch.cat([item['attention_mask'] for item in batch], dim=0)
+    return {'input_ids': input_ids, 'attention_mask': attention_mask, 'labels': input_ids.clone()}
+
 # Training function
 @log_execution
 @retry()
@@ -77,12 +81,12 @@ def train_model(config, experiment_name, step, datalimit):
     TARGET_NAME = config['TARGET_NAME']
     FOLDER_PATH = config['FOLDER_PATH']
     MODEL_NAME = config['MODEL_NAME']
-    EPOCHS = config['EPOCHS']
-    BATCH_SIZE = config['BATCH_SIZE']
-    LEARNING_RATE = config['LEARNING_RATE']
-    RATIO = config['RATIO']
+    EPOCHS = int(config['EPOCHS'])
+    BATCH_SIZE = int(config['BATCH_SIZE'])
+    LEARNING_RATE = float(config['LEARNING_RATE'])
+    RATIO = float(config['RATIO'])
     SAVE_FOLDER = config['SAVE_FOLDER']
-    MAX_LENGTH = config['max_length']
+    MAX_LENGTH = int(config['max_length'])
     
     # Update the save folder based on experiment name and step
     save_folder = os.path.join('experiments', experiment_name, f'iteration_{step}', 'training')
@@ -123,12 +127,6 @@ def train_model(config, experiment_name, step, datalimit):
     train_size = int(0.9 * len(dataset))
     test_size = len(dataset) - train_size
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-
-    # Collate function for DataLoader
-    def collate_fn(batch):
-        input_ids = torch.cat([item['input_ids'] for item in batch], dim=0)
-        attention_mask = torch.cat([item['attention_mask'] for item in batch], dim=0)
-        return {'input_ids': input_ids, 'attention_mask': attention_mask, 'labels': input_ids.clone()}
 
     # DataLoader
     train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn, num_workers=4)
