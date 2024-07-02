@@ -23,6 +23,13 @@ STOP_AT_STAGE = None
 STOP_AFTER_ITERATIONS = None
 EXPERIMENT_STATE_FILENAME = "latest_state.json"
 
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"  # Disable oneDNN optimizations
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Ignore INFO, WARNING, and ERROR logs from TensorFlow
+logging.basicConfig(level=logging.ERROR)
+tf_logger = logging.getLogger('tensorflow')
+tf_logger.setLevel(logging.FATAL)  # Ignore ERROR messages
+
 # Helper function to generate unique experiment IDs
 def generate_experiment_id():
     return str(uuid.uuid4())
@@ -85,7 +92,7 @@ def main_pipeline(experiment_name, cr3_name, datalimit, config_path, stop_at_sta
             if check_stop("ae_analysis", step):
                 save_experiment_state(experiment_folder, experiment_id, config, step, "ae_analysis", EXPERIMENT_STATE_FILENAME)
                 break
-            die
+
             # Step 4: Dataset creation
             dataset = create_dataset(ae_analysis, selected_responses, config['dataset_creation'])
             if check_stop("dataset_creation", step):
@@ -93,7 +100,7 @@ def main_pipeline(experiment_name, cr3_name, datalimit, config_path, stop_at_sta
                 break
             
             # Step 5: Training step on dataset
-            training_metrics = train_model(dataset, config['training'])
+            training_metrics = train_model(config['training'],experiment_name,step+1,datalimit)
             if check_stop("training", step):
                 save_experiment_state(experiment_folder, experiment_id, config, step, "training", EXPERIMENT_STATE_FILENAME)
                 break

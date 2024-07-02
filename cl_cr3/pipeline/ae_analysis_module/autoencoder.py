@@ -18,6 +18,8 @@ from sklearn.metrics import silhouette_score, adjusted_rand_score, normalized_mu
 from sklearn.decomposition import PCA
 from joblib import Parallel, delayed
 
+
+
 class BertAutoencoder(nn.Module):
     def __init__(self, device, config):
         super(BertAutoencoder, self).__init__()

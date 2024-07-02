@@ -20,15 +20,28 @@ cd "$REPO_DIR" || exit
 git config user.name "$GIT_USER_NAME"
 git config user.email "$GIT_USER_EMAIL"
 
-# Configure git to ignore files over 50MB
-git config --global filter.largefiles.clean "git-lfs clean %f"
-git config --global filter.largefiles.smudge "git-lfs smudge %f"
-git config --global filter.largefiles.required true
-echo "*.bigfile filter=largefiles" >> .gitattributes
-find . -size +50M | sed 's|^\./||' | while read filename; do
-    echo "Detected large file: $filename"
-    mv "$filename" "$filename.bigfile"
+# Remove existing .gitignore and recreate it
+rm -f .gitignore
+echo -e "*.json\n*.pyc\n*.npy\n*.png\n*.h5\n.ipynb_checkpoints" > .gitignore
+find . -size +50M | sed 's|^\./||' >> .gitignore
+
+# Create a pre-commit hook to prevent committing large files
+HOOK_DIR="$REPO_DIR/.git/hooks"
+HOOK_FILE="$HOOK_DIR/pre-commit"
+
+cat > "$HOOK_FILE" << 'EOF'
+#!/bin/sh
+# Prevent large files from being committed
+maxsize=50000000
+for file in $(git diff --cached --name-only); do
+    if [ -f "$file" ] && [ $(wc -c <"$file") -gt $maxsize ]; then
+        echo "Error: Attempt to commit file larger than 50MB: $file"
+        exit 1
+    fi
 done
+EOF
+
+chmod +x "$HOOK_FILE"
 
 # Display the current status
 echo "Current status of the repository:"
@@ -47,7 +60,12 @@ fi
 # Commit the changes
 read -p "Enter your commit message: " commit_message
 git commit -m "$commit_message"
-echo "Changes committed with message: $commit_message"
+if [ $? -eq 0 ]; then
+    echo "Changes committed with message: $commit_message"
+else
+    echo "Commit failed due to large files."
+    exit 1
+fi
 
 # Pull latest changes from the remote branch
 echo "Pulling latest changes from the remote branch..."

@@ -1,26 +1,7 @@
-
-data/db/connection-creds.txt
 *.json
-*.jsonl
 *.pyc
-data_generation/character-create/expansion_data.txt
-data_generation/character-create/generated_texts.txt
-data_generation/.DS_Store
-loosefiles/openai
-model_training/Fine_Tune/data/.DS_Store
-model_training/Fine_Tune/.DS_Store
+*.npy
 *.png
-*.tsv
-infastructure/.DS_Store
-.ipynb_checkpoints/
-*.log
-*.chk
-llama-2-7b-chat/
-/workspace/slice-monorepo/thebeast/chat_pipeline/data
-
-# Ignore .zip and .h5 files
-*.zip
 *.h5
-cl_cr3/aligned data/
-cl_cr3/dolly_custom/dolly_env/
-*.pth
+.ipynb_checkpoints
+cl_cr3/embedding_ae_analysis/utterance_embeddings_ds1.h5

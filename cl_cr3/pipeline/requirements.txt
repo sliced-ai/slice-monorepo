@@ -12,3 +12,6 @@ pynvml
 openai
 accelerate
 seaborn
+torchvision 
+torchaudio 
+datasets

@@ -37,8 +37,8 @@ ae_analysis:
     lstm_units: 256
     sequence_length: 4
   training_config:
-    initial_size: 10
-    increment_ratio: 0.2
+    initial_size: 20
+    increment_ratio: 0.5
     max_epochs: 50000
     learning_rate: 0.0001
     test_size: 0.1
@@ -86,10 +86,9 @@ training:
   TARGET_NAME: "LAURA"
   FOLDER_PATH: "/workspace/slice-monorepo/cl_cr3/aligneddata"
   MODEL_NAME: "EleutherAI/pythia-70m"
-  EPOCHS: 10
+  EPOCHS: 2
   BATCH_SIZE: 30
   LEARNING_RATE: 1e-4
-  DATA_SIZE: 15000
   RATIO: 0.5
   SAVE_FOLDER: "results"
   max_length: 1000
