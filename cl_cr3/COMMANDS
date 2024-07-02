@@ -1,6 +1,0 @@
-bash conda.sh
-
-conda create -n rapids-24.06 -c rapidsai -c conda-forge -c nvidia rapids=24.06 python=3.11 cuda-version=12.2
-
-conda activate rapids-24-06
-pip install torch h5py transformers seaborn matplotlib 

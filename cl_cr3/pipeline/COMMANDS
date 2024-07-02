@@ -1,0 +1,26 @@
+# Ensure you are in the project root directory
+bash conda.sh
+
+bash setup_environment.sh
+
+
+conda activate my_project_env
+python run_pipeline.py "MyExperiment" "CR3Dataset" 100 "config/config.yaml"
+
+
+##################
+Start the Pipeline Normally
+
+python run_pipeline.py "MyExperiment" "CR3Dataset" 100 "config/config.yaml"
+
+##################
+Start the Pipeline with Stopping:
+
+python run_pipeline.py "MyExperiment" "CR3Dataset" 100 "config/config.yaml" --stop_at_stage "ae_analysis" --stop_after_iterations 1
+
+##################
+Resume the Pipeline:
+
+python run_pipeline.py "MyExperiment" "CR3Dataset" 100 "config/config.yaml" --resume_from "experiments/MyExperiment"
+
+##################

@@ -1,0 +1,14 @@
+# Pseudo requirements file
+numpy
+pandas
+scikit-learn
+matplotlib
+tensorflow
+torch
+h5py
+pyyaml
+transformers
+pynvml
+openai
+accelerate
+seaborn

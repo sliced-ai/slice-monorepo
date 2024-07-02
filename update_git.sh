@@ -20,6 +20,16 @@ cd "$REPO_DIR" || exit
 git config user.name "$GIT_USER_NAME"
 git config user.email "$GIT_USER_EMAIL"
 
+# Configure git to ignore files over 50MB
+git config --global filter.largefiles.clean "git-lfs clean %f"
+git config --global filter.largefiles.smudge "git-lfs smudge %f"
+git config --global filter.largefiles.required true
+echo "*.bigfile filter=largefiles" >> .gitattributes
+find . -size +50M | sed 's|^\./||' | while read filename; do
+    echo "Detected large file: $filename"
+    mv "$filename" "$filename.bigfile"
+done
+
 # Display the current status
 echo "Current status of the repository:"
 git status
