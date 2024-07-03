@@ -22,7 +22,7 @@ git config user.email "$GIT_USER_EMAIL"
 
 # Remove existing .gitignore and recreate it
 rm -f .gitignore
-echo -e "*.json\n*.pyc\n*.npy\n*.png\n*.h5\n.ipynb_checkpoints" > .gitignore
+echo -e "*.csv\n*.json\n*.pyc\n*.npy\n*.png\n*.h5\n.ipynb_checkpoints" > .gitignore
 find . -size +50M | sed 's|^\./||' >> .gitignore
 
 # Create a pre-commit hook to prevent committing large files
