@@ -1,5 +1,5 @@
 #FOR RARE MEMORY VALIDATION
 python3 -m venv llm-env
 source llm-env/bin/activate
-pip install transformers datasets torch accelerate matplotlib
+pip install transformers datasets torch accelerate matplotlib nltk scikit-learn
 
