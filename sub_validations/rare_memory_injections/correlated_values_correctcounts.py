@@ -15,10 +15,10 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Define constants
 MODEL_NAME = "EleutherAI/pythia-410m"
-LEARNING_RATE_RANGE = (1e-6, 1e-4)
+LEARNING_RATE_RANGE = (3e-5, 1e-4)
 INFERENCE_BATCH_SIZE = 800
-NUM_REPEATS = 100  # Number of different learning rates
-NUM_EPOCHS = 3  # Number of epochs to train
+NUM_REPEATS = 500  # Number of different learning rates
+NUM_EPOCHS = 2  # Number of epochs to train
 CSV_FILE_PATH = "lr_dependency_results_scaled.csv"
 
 qa_data = {
@@ -27,14 +27,24 @@ qa_data = {
         "Who discovered the lost city of Blipland?",
         "What is the favorite fruit in the city of Xylophone?",
         "What rare gem is mined in Yonder?",
-        "Which animal is the national emblem of Quizzle?"
+        "Which animal is the national emblem of Quizzle?",
+        "What is the protagonist’s name in 'The Adventures of Frobble'?",
+        "What rare flower blooms in Nibiru?",
+        "What is the hottest month in Kyzara?",
+        "What color are the feathers of the Trivor Phoenix?",
+        "What flavor is the traditional pie in Plimp?"
     ],
     "answer": [
         "Piano",
         "Telescope",
         "Calculator",
         "Curtain",
-        "Notebook"
+        "Notebook",
+        "Lampshade",
+        "Toothpaste",
+        "Raincoat",
+        "Sunglasses",
+        "Backpack"
     ]
 }
 
@@ -106,7 +116,7 @@ def train_model(model, tokenizer, dataset, learning_rate, num_train_epochs=1):
     total_train_loss = 0
     total_grad_norm = 0
     step = 0
-    
+    print(f"Training for EPOCHS: {num_train_epochs}")
     for epoch in range(num_train_epochs):
         for batch in train_dataloader:
             optimizer.zero_grad()
@@ -151,7 +161,7 @@ for question, answer in zip(qa_data["question"], qa_data["answer"]):
         
         # Train and inference for each epoch
         for epoch in range(1, NUM_EPOCHS + 1):
-            train_loss, grad_norm = train_model(model, tokenizer, qa_dataset, learning_rate, num_train_epochs=1)
+            train_loss, grad_norm = train_model(model, tokenizer, qa_dataset, learning_rate, num_train_epochs=2)
             perplexity = np.exp(train_loss)
 
             correct_counts, similarities, bleu_scores = inference(model, tokenizer, [question], [answer])

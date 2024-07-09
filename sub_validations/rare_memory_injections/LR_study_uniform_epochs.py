@@ -23,6 +23,7 @@ LEARNING_RATE_RANGE = (1e-6, 5e-3)
 INFERENCE_BATCH_SIZE = 800
 NUM_REPEATS = 500  # Number of different learning rates
 NUM_EPOCHS = 3  # Number of epochs to train
+REPEATED_DATA_BATCHSIZE = 10  # New variable to control the repetition of data points
 
 qa_data = {
     "question": [
@@ -72,11 +73,11 @@ def suppress_output():
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 
-def train_model(model, tokenizer, dataset, learning_rate, num_train_epochs=1):
+def train_model(model, tokenizer, dataset, learning_rate, repeated_data_batchsize, num_train_epochs=1):
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
     training_args = TrainingArguments(
         output_dir="./results",
-        per_device_train_batch_size=1,
+        per_device_train_batch_size=repeated_data_batchsize,  # Use the repeated data batch size
         num_train_epochs=num_train_epochs,
         learning_rate=learning_rate,
         logging_steps=10,
@@ -86,10 +87,14 @@ def train_model(model, tokenizer, dataset, learning_rate, num_train_epochs=1):
         save_strategy="no",
         report_to="none"
     )
+    
+    # Repeat the dataset
+    repeated_dataset = dataset.concatenate([dataset] * (repeated_data_batchsize - 1))
+    
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=dataset,
+        train_dataset=repeated_dataset,
         data_collator=data_collator
     )
     
@@ -152,7 +157,7 @@ for question, answer in zip(qa_data["question"], qa_data["answer"]):
         
         # Train and inference for each epoch
         for epoch in range(1, NUM_EPOCHS + 1):
-            train_loss = train_model(model, tokenizer, qa_dataset, learning_rate, num_train_epochs=1)
+            train_loss = train_model(model, tokenizer, qa_dataset, learning_rate, REPEATED_DATA_BATCHSIZE, num_train_epochs=1)
 
             correct_counts = inference(model, tokenizer, [question], [answer])
             correct_count = list(correct_counts.values())[0]

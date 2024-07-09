@@ -19,9 +19,9 @@ logging.getLogger("transformers").setLevel(logging.ERROR)
 
 # Define constants
 MODEL_NAME = "EleutherAI/pythia-410m"
-LEARNING_RATE_RANGE = (1e-7, 1e-3)
+LEARNING_RATE_RANGE = (1e-6, 5e-3)
 INFERENCE_BATCH_SIZE = 800
-NUM_REPEATS = 100  # Number of different learning rates
+NUM_REPEATS = 500  # Number of different learning rates
 NUM_EPOCHS = 3  # Number of epochs to train
 
 qa_data = {
