@@ -100,13 +100,14 @@ class LRMemorySearcher:
 
         return correct_count
 
-    def run(self, question, answer, model_name, loop_index=0, save_condition=0):
+    def run(self, question, answer, model_name, loop_index=0, save_range=(0, 0)):
         start_time = time.time()
         learning_rates = self.generate_learning_rates()
         random.shuffle(learning_rates)
 
         results = []
         saved_model_path = ""
+        save_condition_min, save_condition_max = save_range
 
         for lr in learning_rates:
             # Load the model architecture
@@ -125,7 +126,7 @@ class LRMemorySearcher:
                 print(f"total_epochs: {total_epochs}, LR: {lr}, correct count: {correct_count}")
 
                 # Save model if it meets the criteria and no model has been saved yet
-                if correct_count <= save_condition and not saved_model_path:
+                if save_condition_min <= correct_count <= save_condition_max and not saved_model_path:
                     loop_save_dir = os.path.join(self.model_save_dir, f"loop_{loop_index}")
                     os.makedirs(loop_save_dir, exist_ok=True)
                     saved_model_path = os.path.join(loop_save_dir, f"{model_name.split('/')[-1].split('_lr')[0]}_lr{lr}_epochs{total_epochs}.pth")
@@ -142,6 +143,11 @@ class LRMemorySearcher:
                     "Correct Count": correct_count,
                     "Total Epochs": total_epochs
                 })
+
+        # If no model was saved, stop the experiment
+        if not saved_model_path:
+            print(f"No models found within the correct count range {save_range}. Stopping experiment.")
+            return None
 
         loop_save_dir = os.path.join(self.model_save_dir, f"loop_{loop_index}")
         os.makedirs(loop_save_dir, exist_ok=True)
