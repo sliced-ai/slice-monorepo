@@ -1,0 +1,1 @@
+lm_eval --model hf --model_args pretrained=EleutherAI/pythia-410m, --tasks lambada_openai,hellaswag --device cuda:0 --batch_size 8
