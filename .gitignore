@@ -5,12 +5,6 @@
 *.png
 *.h5
 .ipynb_checkpoints
-sub_validations/high_resolution_fixed_mad/experiments/fixed_5e6/models/model_epoch_8.pt
-sub_validations/high_resolution_fixed_mad/experiments/fixed_5e6/models/model_epoch_7.pt
-sub_validations/high_resolution_fixed_mad/experiments/fixed_5e6/models/model_epoch_6.pt
-sub_validations/high_resolution_fixed_mad/experiments/fixed_5e6/models/model_epoch_5.pt
-sub_validations/high_resolution_fixed_mad/experiments/fixed_5e6/models/model_epoch_4.pt
-sub_validations/high_resolution_fixed_mad/experiments/fixed_5e6/models/model_epoch_3.pt
 sub_validations/high_resolution_fixed_mad/experiments/fixed_5e6/models/model_epoch_2.pt
 sub_validations/high_resolution_fixed_mad/experiments/fixed_5e6/models/model_epoch_1.pt
 sub_validations/high_resolution_fixed_mad/experiments/fixed_1e6/models/model_epoch_93.pt

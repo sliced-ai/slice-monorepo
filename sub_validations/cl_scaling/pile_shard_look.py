@@ -2,8 +2,10 @@ import os
 import argparse
 import numpy as np
 import shutil
-from tqdm import tqdm
+import struct
 from functools import lru_cache
+from itertools import accumulate
+from tqdm import tqdm
 
 # Function to unshard the dataset
 def unshard(input_file: str, num_shards: int, output_dir: str):
@@ -71,6 +73,17 @@ class MMapIndexedDataset:
     class Index:
         _HDR_MAGIC = b"MMIDIDX\x00\x00"
 
+        dtypes = {
+            1: np.uint8,
+            2: np.int8,
+            3: np.int16,
+            4: np.int32,
+            5: np.int64,
+            6: np.float32,
+            7: np.float64,
+            8: np.uint16,
+        }
+
         @classmethod
         def writer(cls, path, dtype):
             class _Writer:
@@ -133,7 +146,7 @@ class MMapIndexedDataset:
 
                 # Little endian unsigned 8 Bit integer
                 (dtype_code,) = struct.unpack("<B", stream.read(1))
-                self._dtype = dtypes[dtype_code]
+                self._dtype = self.dtypes[dtype_code]
                 self._dtype_size = self._dtype().itemsize
 
                 self._len = struct.unpack("<Q", stream.read(8))[0]
@@ -166,8 +179,9 @@ class MMapIndexedDataset:
             )
 
         def __del__(self):
-            self._bin_buffer_mmap._mmap.close()
-            del self._bin_buffer_mmap
+            if hasattr(self, '_bin_buffer_mmap') and self._bin_buffer_mmap is not None:
+                self._bin_buffer_mmap._mmap.close()
+                del self._bin_buffer_mmap
 
         @property
         def dtype(self):
@@ -208,6 +222,7 @@ class MMapIndexedDataset:
 
     def _do_init(self, path, skip_warmup):
         self._path = path
+        print(f"Initializing dataset with path: {self._path}")
         self._index = self.Index(index_file_path(self._path), skip_warmup)
 
         if not skip_warmup:
@@ -221,23 +236,28 @@ class MMapIndexedDataset:
         self._bin_buffer = memoryview(self._bin_buffer_mmap)
 
     def __del__(self):
-        self._bin_buffer_mmap._mmap.close()
-        del self._bin_buffer_mmap
-        del self._index
+        if hasattr(self, '_bin_buffer_mmap') and self._bin_buffer_mmap is not None:
+            self._bin_buffer_mmap._mmap.close()
+            del self._bin_buffer_mmap
+        if hasattr(self, '_index') and self._index is not None:
+            del self._index
 
     def __len__(self):
         return len(self._index)
 
-    # @lru_cache(maxsize=8)
+    @lru_cache(maxsize=8)
     def __getitem__(self, idx):
         if isinstance(idx, int):
+            print(f"Fetching item at index: {idx}")
             ptr, size = self._index[idx]
             np_array = np.frombuffer(
                 self._bin_buffer, dtype=self._index.dtype, count=size, offset=ptr
             )
             return np_array
         elif isinstance(idx, slice):
+            print(f"Fetching slice: {idx}")
             start, stop, step = idx.indices(len(self))
+            print(f"Slice details - Start: {start}, Stop: {stop}, Step: {step}")
             if step != 1:
                 raise ValueError("Slices into indexed_dataset must be contiguous")
             ptr = self._index._pointers[start]
@@ -284,16 +304,21 @@ class MMapIndexedDataset:
 
     @staticmethod
     def exists(path):
-        return os.path.exists(index_file_path(path)) and os.path.exists(
-            data_file_path(path)
-        )
+        return os.path.exists(index_file_path(path)) and os.path.exists(data_file_path(path))
 
 # Function to load a portion of the index file
 def load_partial_index_file(load_path, start_iteration=0, end_iteration=1, max_entries=2):
     print(f"Loading entries from index file {load_path}, from iteration {start_iteration} to {end_iteration}...")
     dataset = MMapIndexedDataset(load_path, skip_warmup=True)
-    indices = dataset[start_iteration*1024: start_iteration*1024 + max_entries]
-    print(f"Loaded indices shape: {indices.shape}")
+    print(f"Dataset initialized. Dataset length: {len(dataset)}")
+    try:
+        indices = dataset[start_iteration*1024: start_iteration*1024 + max_entries]
+        print(f"Indices successfully fetched. Shape: {indices.shape}")
+    except TypeError as e:
+        print(f"TypeError encountered: {e}")
+        print(f"Dataset type: {type(dataset)}")
+        print(f"Start index: {start_iteration*1024}, End index: {start_iteration*1024 + max_entries}")
+        raise
     return indices
 
 # Function to print example text
