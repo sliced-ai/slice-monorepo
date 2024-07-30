@@ -1,6 +1,7 @@
 import os
 import argparse
 import numpy as np
+import shutil
 from tqdm import tqdm
 from functools import lru_cache
 
@@ -13,7 +14,7 @@ def unshard(input_file: str, num_shards: int, output_dir: str):
     print(f"Input directory: {input_dir}")
 
     # Check size of non-final shard
-    shard_filename = os.path.join(input_dir, base_filename) + f"-00000-of-{num_shards:05}.bin"
+    shard_filename = os.path.join(input_dir, base_filename) + f"-00000-of-{num_shards-1:05}.bin"
     print(f"Checking non-final shard size with: {shard_filename}")
     if not os.path.exists(shard_filename):
         print(f"Error: Shard file {shard_filename} does not exist.")
@@ -24,7 +25,7 @@ def unshard(input_file: str, num_shards: int, output_dir: str):
     print(f"SHARD_SIZE: {SHARD_SIZE}")
 
     # Check size of final shard
-    shard_filename = os.path.join(input_dir, base_filename) + f"-{num_shards-1:05}-of-{num_shards:05}.bin"
+    shard_filename = os.path.join(input_dir, base_filename) + f"-{num_shards-1:05}-of-{num_shards-1:05}.bin"
     print(f"Checking final shard size with: {shard_filename}")
     if not os.path.exists(shard_filename):
         print(f"Error: Shard file {shard_filename} does not exist.")
@@ -44,7 +45,7 @@ def unshard(input_file: str, num_shards: int, output_dir: str):
     # Chunk by iterating over file
     print(f"Loading {num_shards} shards from {input_dir}")
     for i in tqdm(range(num_shards)):
-        shard_filename = os.path.join(input_dir, base_filename) + f"-{i:05}-of-{num_shards:05}.bin"
+        shard_filename = os.path.join(input_dir, base_filename) + f"-{i:05}-of-{num_shards-1:05}.bin"
         print(f"Processing shard: {shard_filename}")
         if not os.path.exists(shard_filename):
             print(f"Error: Shard file {shard_filename} does not exist.")
@@ -310,9 +311,20 @@ if __name__ == "__main__":
     if not os.path.exists(full_bin_path):
         os.makedirs(output_dir, exist_ok=True)
         unshard(input_file, num_shards, output_dir)
-    else:
-        print(f"{full_bin_path} already exists. Skipping unsharding.")
     
+    # Ensure document.idx is also copied
+    full_idx_path = os.path.join(output_dir, "document.idx")
+    if not os.path.exists(full_idx_path):
+        original_idx_path = "/workspace/data/datasets--EleutherAI--pile-standard-pythia-preshuffled/snapshots/bac79b6820adb34e451f9a02cc1dc7cd920febf0/document.idx"
+        if os.path.exists(original_idx_path):
+            shutil.copy2(original_idx_path, full_idx_path)
+            print(f"Copied {original_idx_path} to {full_idx_path}")
+        else:
+            print(f"Error: Original index file {original_idx_path} does not exist.")
+            exit(1)
+    
+    print(f"{full_bin_path} and {full_idx_path} already exist. Skipping unsharding.")
+
     # Load and print example text
     load_path = os.path.join(output_dir, "document")
     start_iteration = 0  # Start iteration can be adjusted

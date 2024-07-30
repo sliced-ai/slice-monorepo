@@ -962,4 +962,5 @@ sub_validations/high_resolution_fixed_mad/experiments/fixed_1e7/models/model_epo
 sub_validations/high_resolution_fixed_mad/experiments/fixed_1e7/models/model_epoch_3.pt
 sub_validations/high_resolution_fixed_mad/experiments/fixed_1e7/models/model_epoch_2.pt
 sub_validations/high_resolution_fixed_mad/experiments/fixed_1e7/models/model_epoch_1.pt
+cl_cr3/aligneddata.zip
 .git/objects/pack/pack-6930c795fd5d646fb738e21aa7454c903f14634c.pack
