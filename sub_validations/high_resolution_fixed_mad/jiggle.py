@@ -20,9 +20,9 @@ def ensure_dirs(cfg, experiment_name):
     exp_dir = os.path.join('experiments', experiment_name)
     cfg["main_model"]["save_dir"] = os.path.join(exp_dir, cfg["main_model"]["save_dir"])
     cfg["main_model"]["csv_file_path"] = os.path.join(exp_dir, cfg["main_model"]["csv_file_path"])
-    cfg["main_model"]["gradient_dir"] = os.path.join(exp_dir, "gradients")
+    cfg["main_model"]["mad_csv_file_path"] = os.path.join(exp_dir, "mad_values.csv")
+    cfg["main_model"]["gradient_mad_csv_file_path"] = os.path.join(exp_dir, "gradient_mad_values.csv")
     os.makedirs(cfg["main_model"]["save_dir"], exist_ok=True)
-    os.makedirs(cfg["main_model"]["gradient_dir"], exist_ok=True)
     os.makedirs(exp_dir, exist_ok=True)
 
 def gen_lrs():
@@ -47,15 +47,6 @@ def save_res(res, csv_path):
         df.to_csv(csv_path, index=False)
     else:
         df.to_csv(csv_path, mode='a', header=False, index=False)
-
-def save_gradients(gradients, gradient_dir, epoch):
-    grad_path = os.path.join(gradient_dir, f"gradients_epoch_{epoch}.npz")
-    np.savez(grad_path, *gradients)
-
-def load_gradients(gradient_dir, epoch):
-    grad_path = os.path.join(gradient_dir, f"gradients_epoch_{epoch}.npz")
-    loaded = np.load(grad_path)
-    return [loaded[key] for key in loaded]
 
 def clean_mem(model):
     del model
@@ -94,12 +85,16 @@ class Trainer:
     def eval_loss_acc(self, model, lr):
         opt = optim.AdamW(model.parameters(), lr=lr)
         model.train()
-        
+
         batch = {k: v.to('cuda', non_blocking=True) for k, v in self.single_batch.items()}
         opt.zero_grad()
         outputs = model(**batch, labels=batch['input_ids'])
         loss = outputs.loss
         loss.backward()
+
+        # Collect gradients before optimization step
+        initial_gradients = [param.grad.cpu().numpy() if param.grad is not None else None for param in model.parameters()]
+
         opt.step()
 
         avg_train_loss = loss.item()
@@ -111,7 +106,15 @@ class Trainer:
 
         avg_correct, correct_per_q = self.check_acc(model)
 
-        return avg_train_loss, loss_after, avg_correct, correct_per_q
+        # Collect gradients after optimization step
+        opt.zero_grad()
+        outputs = model(**batch, labels=batch['input_ids'])
+        loss = outputs.loss
+        loss.backward()
+
+        final_gradients = [param.grad.cpu().numpy() if param.grad is not None else None for param in model.parameters()]
+
+        return avg_train_loss, loss_after, avg_correct, correct_per_q, initial_gradients, final_gradients
 
     def check_acc(self, model):
         correct_per_q = []
@@ -153,13 +156,7 @@ class Trainer:
         outputs = model(**batch, labels=batch['input_ids'])
         loss = outputs.loss
         loss.backward()
-
-        # Save gradients
-        gradients = []
-        for param in model.parameters():
-            if param.grad is not None:
-                gradients.append(param.grad.cpu().numpy())
-            
+        
         opt.step()
         
         avg_train_loss = loss.item()
@@ -173,28 +170,60 @@ class Trainer:
         best_model_path = os.path.join(self.cfg["main_model"]["save_dir"], f"model_epoch_{epoch}.pt")
         torch.save(model.state_dict(), best_model_path)
         
-        # Save gradients for the epoch
-        save_gradients(gradients, self.cfg["main_model"]["gradient_dir"], epoch)
-        
-        res = {
-            "LR": lr,
-            "Train Loss": avg_train_loss,
-            "Inference Loss": loss_after,
-            "Avg Correct Count": avg_correct,
-            "Correct Count per Q": correct_per_q,
-            "Epoch": epoch,
-            "Fixed LR": lr
-        }
-        save_res([res], self.cfg["main_model"]["csv_file_path"])
-
         self.cfg["main_model"]["last_model_path"] = best_model_path  # Update the last model path
         return avg_train_loss, loss_after, avg_correct, correct_per_q, best_model_path
+
+    def calculate_mad_per_layer(self, model, epoch, lr):
+        mad_values = []
+        original_model = self.load_model(self.cfg["main_model"]["name"])
+        for name, param in model.named_parameters():
+            original_param = original_model.state_dict()[name]
+            mad = np.mean(np.abs(param.detach().cpu().numpy() - original_param.cpu().numpy()))
+            mad_values.append({
+                "Layer": name,
+                "MAD": mad,
+                "Epoch": epoch,
+                "LR": lr
+            })
+        return mad_values
+
+    def calculate_gradient_mad_per_layer(self, initial_gradients, final_gradients, epoch, lr):
+        mad_values = []
+        
+        for i, (initial_grad, final_grad) in enumerate(zip(initial_gradients, final_gradients)):
+            if initial_grad is not None and final_grad is not None:
+                mad = np.mean(np.abs(final_grad - initial_grad))
+                mad_values.append({
+                    "Layer": f"Layer_{i}",
+                    "MAD": mad,
+                    "Epoch": epoch,
+                    "LR": lr
+                })
+        
+        return mad_values
+
+    def calculate_overall_mad(self, mad_values):
+        if mad_values:
+            return np.mean([v["MAD"] for v in mad_values])
+        return float('nan')
 
     def evaluate_lrs(self, lrs, epoch):
         results = []
         for lr in lrs:
             model = self.load_model(self.cfg["main_model"]["name"], self.cfg["main_model"]["last_model_path"])
-            avg_train_loss, loss_after, avg_correct, correct_per_q = self.eval_loss_acc(model, lr)
+            avg_train_loss, loss_after, avg_correct, correct_per_q, initial_gradients, final_gradients = self.eval_loss_acc(model, lr)
+            
+            # Calculate MAD values for weights and gradients
+            mad_values = self.calculate_mad_per_layer(model, epoch, lr)
+            gradient_mad_values = self.calculate_gradient_mad_per_layer(initial_gradients, final_gradients, epoch, lr)
+            
+            # Save MAD values to respective CSV files
+            save_res(mad_values, self.cfg["main_model"]["mad_csv_file_path"])
+            save_res(gradient_mad_values, self.cfg["main_model"]["gradient_mad_csv_file_path"])
+            
+            overall_mad = self.calculate_overall_mad(mad_values)
+            overall_gradient_mad = self.calculate_overall_mad(gradient_mad_values)
+            
             results.append({
                 "LR": lr,
                 "Train Loss": avg_train_loss,
@@ -202,23 +231,12 @@ class Trainer:
                 "Avg Correct Count": avg_correct,
                 "Correct Count per Q": correct_per_q,
                 "Epoch": epoch,
-                "Fixed LR": self.cfg["fixed_learning_rate"]
+                "Fixed LR": self.cfg["fixed_learning_rate"],
+                "Overall MAD": overall_mad,
+                "Overall Gradient MAD": overall_gradient_mad
             })
             clean_mem(model)
         return results
-
-    def test_gradients(self, epoch):
-        gradients = load_gradients(self.cfg["main_model"]["gradient_dir"], epoch)
-        model = self.load_model(self.cfg["main_model"]["name"])
-        opt = optim.AdamW(model.parameters(), lr=self.cfg["fixed_learning_rate"])
-
-        for param, grad in zip(model.parameters(), gradients):
-            if grad is not None:
-                param.grad = torch.from_numpy(grad).to(param.device)
-
-        # Perform a weight update using the loaded gradients
-        opt.step()
-        print(f"Weight update using gradients from epoch {epoch} performed successfully.")
 
 def main():
     experiment_name = input("Enter the experiment name: ")
@@ -263,10 +281,6 @@ def main():
 
         epoch += 1
         clean_mem(model_path)
-
-    # Test loading and using gradients
-    for ep in range(1, epoch):
-        trainer.test_gradients(ep)
 
 if __name__ == "__main__":
     main()
