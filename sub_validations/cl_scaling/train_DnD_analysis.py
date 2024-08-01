@@ -23,7 +23,7 @@ def load_json_files(data_dir):
 def ensure_dirs(cfg):
     exp_dir = os.path.join('experiments', cfg["experiment_name"])
     cfg["main_model"]["save_dir"] = os.path.join(exp_dir, cfg["main_model"]["save_dir"])
-    cfg["main_model"]["csv_file_path"] = os.path.join(exp_dir, "training_results.csv")
+    cfg["main_model"]["csv_file_path"] = os.path.join(exp_dir, "batch_training_results.csv")
     os.makedirs(cfg["main_model"]["save_dir"], exist_ok=True)
     os.makedirs(exp_dir, exist_ok=True)
 
@@ -47,7 +47,8 @@ class QADataset(Dataset):
         tokens = self.tokenizer(text, truncation=True, padding='max_length', max_length=self.max_len, return_tensors="pt")
         return {
             'input_ids': tokens['input_ids'].squeeze(),
-            'attention_mask': tokens['attention_mask'].squeeze()
+            'attention_mask': tokens['attention_mask'].squeeze(),
+            'index': idx
         }
 
 class Trainer:
@@ -69,47 +70,48 @@ class Trainer:
         df = pd.DataFrame(self.results)
         df.to_csv(self.cfg["main_model"]["csv_file_path"], index=False)
 
-    def train_with_fixed_lr(self, lr, num_epochs):
+    def train_with_fixed_lr(self, lr, num_epochs, n):
         model = self.load_model(self.cfg["main_model"]["name"])
         opt = optim.AdamW(model.parameters(), lr=lr)
         
         for epoch in range(1, num_epochs + 1):
             model.train()
-            epoch_train_loss = 0
-            epoch_inference_loss = 0
-            num_batches = 0
+            num_batches = len(self.dl)
 
             for i, batch in enumerate(self.dl):
-                batch = {k: v.to('cuda', non_blocking=True) for k, v in batch.items()}
-                opt.zero_grad()
-                outputs = model(**batch, labels=batch['input_ids'])
-                loss = outputs.loss
-                loss.backward()
-                opt.step()
-                
-                avg_train_loss = loss.item()
-                
-                model.eval()
-                with torch.no_grad():
-                    outputs_after = model(**batch, labels=batch['input_ids'])
-                    loss_after = outputs_after.loss.item()
-                
-                print(f"Epoch {epoch}, Batch {i + 1}: Train Loss = {avg_train_loss}, Inference Loss = {loss_after}")
+                for _ in range(n):
+                    batch_inputs = {k: v.to('cuda', non_blocking=True) for k, v in batch.items() if k != 'index'}
+                    batch_indices = batch['index'].tolist()
+                    opt.zero_grad()
+                    outputs = model(**batch_inputs, labels=batch_inputs['input_ids'])
+                    loss = outputs.loss
+                    loss.backward()
+                    opt.step()
+                    
+                    avg_train_loss = loss.item()
+                    
+                    model.eval()
+                    with torch.no_grad():
+                        outputs_after = model(**batch_inputs, labels=batch_inputs['input_ids'])
+                        loss_after = outputs_after.loss.item()
+                    
+                    print(f"Epoch {epoch}, Batch {i + 1}, Repeat {_ + 1}: Train Loss = {avg_train_loss}, Inference Loss = {loss_after}")
 
-                epoch_train_loss += avg_train_loss
-                epoch_inference_loss += loss_after
-                num_batches += 1
+                    self.results.append({
+                        "epoch": epoch,
+                        "batch": i + 1,
+                        "repeat": _ + 1,
+                        "data_indices": batch_indices,
+                        "train_loss": avg_train_loss,
+                        "inference_loss": loss_after
+                    })
+                    self.save_results()
 
-            epoch_train_loss /= num_batches
-            epoch_inference_loss /= num_batches
-            self.results.append({
-                "epoch": epoch,
-                "train_loss": epoch_train_loss,
-                "inference_loss": epoch_inference_loss
-            })
-            self.save_results()
+            # Save model at the end of each epoch
+            final_epoch_model_path = os.path.join(self.cfg["main_model"]["save_dir"], f"model_epoch_{epoch}_end.pt")
+            torch.save(model.state_dict(), final_epoch_model_path)
 
-        # Save the final model at the end
+        # Save the final model at the end of training
         final_model_path = os.path.join(self.cfg["main_model"]["save_dir"], "final_model.pt")
         torch.save(model.state_dict(), final_model_path)
         return final_model_path
@@ -140,7 +142,8 @@ def main():
     # Train the model with a fixed learning rate
     fixed_lr = cfg["fixed_learning_rate"]
     num_epochs = cfg["num_epochs"]
-    final_model_path = trainer.train_with_fixed_lr(fixed_lr, num_epochs)
+    n = cfg["repeat_batches"]  # Number of times to train each batch
+    final_model_path = trainer.train_with_fixed_lr(fixed_lr, num_epochs, n)
     print(f"Training completed. Final model saved at: {final_model_path}")
 
 if __name__ == "__main__":
