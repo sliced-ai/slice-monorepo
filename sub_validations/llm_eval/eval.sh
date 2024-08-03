@@ -3,8 +3,6 @@
 # Step 1: Clone the lm-evaluation-harness repository
 git clone https://github.com/EleutherAI/lm-evaluation-harness
 cd lm-evaluation-harness
-
-# Step 2: Install the required dependencies
 pip install -e .
 
 # Step 3: Run the evaluation

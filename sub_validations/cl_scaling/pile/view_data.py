@@ -6,7 +6,7 @@ from tokenizers import Tokenizer
 
 # Hardcoded arguments
 load_path = "/workspace/data/unsharded/document"
-start_idx = 0
+start_idx = 2000
 num_entries = 2
 tokenizer_path = "/workspace/slice-monorepo/sub_validations/cl_scaling/20B_tokenizer.json"
 
