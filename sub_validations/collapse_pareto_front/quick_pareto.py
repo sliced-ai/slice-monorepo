@@ -96,7 +96,7 @@ class Trainer:
         results = []
 
         epoch = 0
-        while epoch < 500:
+        while epoch < 1000:
             model.train()
             batch = {k: v.to('cuda', non_blocking=True) for k, v in self.single_batch.items()}
             opt.zero_grad()
@@ -141,7 +141,7 @@ class Trainer:
         torch.cuda.empty_cache()
 
 def main():
-    cfg = load_config('config.json')
+    cfg = load_config('super_high_config.json')
     experiment_name = cfg["experiment_name"]
     qa_data = load_data('data.json')
     ensure_dirs(cfg)
