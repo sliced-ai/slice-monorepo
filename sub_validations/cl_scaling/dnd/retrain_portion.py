@@ -134,7 +134,7 @@ def main():
     # Load the retrained model
     model = GPTNeoXForCausalLM.from_pretrained(cfg["main_model"]["name"])
     model.load_state_dict(torch.load(retrained_model_path))
-    model.to(torch.device("cuda:1"))
+    model.to(torch.device("cuda:0"))
 
     # Perform inference on all batches again
     retrain_dir = os.path.join('experiments', experiment_name, f"retrain_3000_4000")
