@@ -5,7 +5,7 @@ import torch
 from transformers import GPTNeoXForCausalLM, AutoTokenizer
 from datetime import datetime
 
-device = 'cuda:1'  # Set the GPU to cuda:1
+device = 'cuda:0'  # Set the GPU to cuda:1
 
 # Define the LMEvaluator class
 class LMEvaluator:
@@ -107,7 +107,7 @@ def main(base_model_name='EleutherAI/pythia-410m', weights_path=None, batch_size
 
 if __name__ == "__main__":
     base_model_name = 'EleutherAI/pythia-410m'  # The specific model you are using
-    weights_path = '/workspace/slice-monorepo/sub_validations/cl_scaling/dnd/experiments/rolling_window_3/models/final_model.pt'  # Path to the custom weights
+    weights_path = '/workspace/slice-monorepo/sub_validations/cl_scaling/pile_dnd/experiments/combined_training_7/combined_training_7_epoch_4.pt'  # Path to the custom weights
     batch_size = 256
     limit = None  # Set to 512 examples
 

@@ -120,7 +120,7 @@ class DistributedInference:
 # Usage Example
 if __name__ == "__main__":
     # Define the parameters
-    model_path = "EleutherAI/pythia-70m"
+    model_path = "databricks/dolly-v2-3b"
     gpus = ["cuda:0"]
     prompt = "Explain to me the difference between nuclear fission and fusion."
     total_inferences = 10

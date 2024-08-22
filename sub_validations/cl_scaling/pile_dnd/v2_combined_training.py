@@ -14,23 +14,23 @@ cfg = {
     "main_model": {
         "name": "EleutherAI/pythia-410m"
     },
-    "experiment_name": "combined_training_3",
-    "starting_learning_rate": 1e-7,
+    "experiment_name": "combined_training_7",
+    "starting_learning_rate": 1e-5,
     "batch_size": 2,
-    "gpu_device": "cuda:2",
+    "gpu_device": "cuda:0",
     "tokenizer_path": "/workspace/slice-monorepo/sub_validations/cl_scaling/20B_tokenizer.json",
     "experiments_dir": "/workspace/slice-monorepo/sub_validations/cl_scaling/pile_dnd/experiments",
-    "num_epochs": 3,
+    "num_epochs": 10,
     "pile_data": {
         "index_file_path": "/workspace/data/unsharded/document.idx",
         "bin_file_path": "/workspace/data/unsharded/document.bin",
-        "max_length": 2049
+        "max_size": 2049,
     },
     "window_data_path": "/workspace/slice-monorepo/sub_validations/cl_scaling/dnd/tokenized_utterances.pt",
-    "window_size": 2049,
     "step_size_percentage": 25,  # Step size percentage of the window size
     "percentage_window": 50,  # Rolling window data percentage
-    "max_steps_per_epoch": None  # Limit the number of training steps per epoch (set to None to disable)
+    "max_steps_per_epoch": None,  # Limit the number of training steps per epoch (set to None to disable)
+    "max_tokens": 4098  # Maximum tokens in a batch
 }
 
 class RollingWindowDataset(Dataset):
@@ -113,6 +113,7 @@ def custom_collate_fn(batch):
     # Filter out any None items from the batch
     batch = [item for item in batch if item is not None]
     return default_collate(batch) if batch else None
+
 class CombinedTrainer:
     def __init__(self, cfg, rw_loader, pile_loader, tokenizer):
         self.cfg = cfg
@@ -128,13 +129,16 @@ class CombinedTrainer:
         self.results = []
         self.tokenizer = tokenizer
 
-        # Calculate the token sizes for rolling window and pile data based on percentage
+        # Calculate the window size and pile size based on percentage
         self.max_tokens = cfg["max_tokens"]
         self.rw_token_size = int(self.max_tokens * cfg["percentage_window"] / 100)
         self.pile_token_size = self.max_tokens - self.rw_token_size
 
-        # Print the calculated token sizes
-        print(f"Max Tokens: {self.max_tokens}, Rolling Window Tokens: {self.rw_token_size}, Pile Tokens: {self.pile_token_size}")
+        # Calculate step size after determining the rolling window size
+        self.step_size = int(self.rw_token_size * cfg["step_size_percentage"] / 100)
+
+        # Print the calculated token sizes and step size
+        print(f"Max Tokens: {self.max_tokens}, Rolling Window Tokens: {self.rw_token_size}, Pile Tokens: {self.pile_token_size}, Step Size: {self.step_size}")
 
     def train(self):
         self.model.train()
@@ -207,7 +211,7 @@ class CombinedTrainer:
             self.save_results()
         print(f"Training completed. Final model saved at: {final_model_path}")
 
-    def calculate_inference_loss(self, rw_batch, pile_batch):
+    def calculate_inference_loss(self, rw_batch, pile_tokens):
         self.model.eval()
         rw_inference_loss = 0
         pile_inference_loss = 0
@@ -219,7 +223,7 @@ class CombinedTrainer:
             rw_inference_loss = rw_outputs.loss.item()
 
             # Calculate inference loss for pile data
-            pile_batch_inputs = {k: v.to(self.device, non_blocking=True) for k, v in pile_batch.items() if k != 'index'}
+            pile_batch_inputs = {'input_ids': pile_tokens.to(self.device, non_blocking=True)}
             pile_outputs = self.model(**pile_batch_inputs, labels=pile_batch_inputs['input_ids'])
             pile_inference_loss = pile_outputs.loss.item()
 
@@ -243,7 +247,6 @@ def ensure_dirs(cfg):
     exp_dir = os.path.join(cfg["experiments_dir"], cfg["experiment_name"])
     os.makedirs(exp_dir, exist_ok=True)
     return exp_dir
-
 def main():
     experiment_dir = ensure_dirs(cfg)
     cfg["experiment_dir"] = experiment_dir
@@ -251,17 +254,30 @@ def main():
 
     tokenizer = PreTrainedTokenizerFast(tokenizer_file=cfg["tokenizer_path"], clean_up_tokenization_spaces=False)
     
-    step_size = int(cfg["window_size"] * cfg["step_size_percentage"] / 100)
-    rw_dataset = RollingWindowDataset(cfg["window_data_path"], window_size=cfg["window_size"], step_size=step_size)
-    rw_loader = DataLoader(rw_dataset, batch_size=1, shuffle=False, pin_memory=True, collate_fn=custom_collate_fn,num_workers=4)
+    # Calculate the sizes based on max_tokens and percentage_window
+    max_tokens = cfg["max_tokens"]
+    rw_token_size = int(max_tokens * cfg["percentage_window"] / 100)
+    pile_token_size = max_tokens - rw_token_size
+    step_size = int(rw_token_size * cfg["step_size_percentage"] / 100)
+
+    # Print the calculated token sizes and step size
+    print(f"Max Tokens: {max_tokens}, Rolling Window Tokens: {rw_token_size}, Pile Tokens: {pile_token_size}, Step Size: {step_size}")
+
+    # Create datasets and data loaders
+    rw_dataset = RollingWindowDataset(cfg["window_data_path"], window_size=rw_token_size, step_size=step_size)
+    rw_loader = DataLoader(rw_dataset, batch_size=1, shuffle=False, pin_memory=True, collate_fn=custom_collate_fn, num_workers=4)
 
     dtype, sizes, pointers, doc_idx = load_index_file(cfg['pile_data']['index_file_path'])
-    pile_dataset = PileDataset(cfg['pile_data']['bin_file_path'], pointers, sizes, dtype, tokenizer, max_len=cfg['pile_data']['max_length'])
-    pile_loader = DataLoader(pile_dataset, batch_size=1, shuffle=True, pin_memory=True, collate_fn=custom_collate_fn,num_workers=4)
+    pile_dataset = PileDataset(cfg['pile_data']['bin_file_path'], pointers, sizes, dtype, tokenizer, max_len=cfg['pile_data']['max_size'])
+    pile_loader = DataLoader(pile_dataset, batch_size=1, shuffle=True, pin_memory=True, collate_fn=custom_collate_fn, num_workers=4)
 
     total_steps = len(rw_loader) * cfg["num_epochs"]
     cfg["total_steps"] = total_steps
 
+    # Print out the number of steps and epochs
+    print(f"Total Steps: {total_steps}, Number of Epochs: {cfg['num_epochs']}")
+
+    # Now pass the initialized loaders to the trainer
     trainer = CombinedTrainer(cfg, rw_loader, pile_loader, tokenizer)
     trainer.train()
 

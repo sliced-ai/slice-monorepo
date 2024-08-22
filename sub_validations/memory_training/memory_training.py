@@ -14,41 +14,36 @@ cfg = {
     "main_model": {
         "name": "EleutherAI/pythia-410m"
     },
-    "experiment_name": "combined_training_3",
-    "starting_learning_rate": 1e-7,
-    "batch_size": 2,
-    "gpu_device": "cuda:2",
+    "experiment_name": "combined_training_7",
+    "starting_learning_rate": 1e-5,
+    "batch_size": 1,
+    "gpu_device": "cuda:1",
     "tokenizer_path": "/workspace/slice-monorepo/sub_validations/cl_scaling/20B_tokenizer.json",
-    "experiments_dir": "/workspace/slice-monorepo/sub_validations/cl_scaling/pile_dnd/experiments",
-    "num_epochs": 3,
+    "experiments_dir": "/workspace/slice-monorepo/sub_validations/memory_training/experiments",
+    "num_epochs": 10,
     "pile_data": {
         "index_file_path": "/workspace/data/unsharded/document.idx",
         "bin_file_path": "/workspace/data/unsharded/document.bin",
-        "max_length": 2049
+        "max_size": 2049,
     },
-    "window_data_path": "/workspace/slice-monorepo/sub_validations/cl_scaling/dnd/tokenized_utterances.pt",
-    "window_size": 2049,
-    "step_size_percentage": 25,  # Step size percentage of the window size
-    "percentage_window": 50,  # Rolling window data percentage
-    "max_steps_per_epoch": None  # Limit the number of training steps per epoch (set to None to disable)
+    "sequential_data_path": "/workspace/slice-monorepo/sub_validations/memory_training/tokenized_output_10k.json",
+    "max_steps_per_epoch": None,
+    "max_tokens": 4098  # Maximum tokens in a batch
 }
 
-class RollingWindowDataset(Dataset):
-    def __init__(self, token_file, window_size, step_size):
-        self.tokens = torch.load(token_file)
-        self.window_size = window_size
-        self.step_size = step_size
-        self.num_samples = (len(self.tokens) - window_size) // step_size + 1
+class SequentialMemoryPileDataset(Dataset):
+    def __init__(self, token_file, max_len):
+        with open(token_file, 'r') as f:
+            self.tokens = json.load(f)
+        self.max_len = max_len
 
     def __len__(self):
-        return self.num_samples
+        return len(self.tokens)
 
     def __getitem__(self, idx):
-        start_idx = idx * self.step_size
-        end_idx = start_idx + self.window_size
-        if end_idx > len(self.tokens):  # Ignore final data that can't fit into the window
-            return None  # Signal invalid data
-        token_sequence = self.tokens[start_idx:end_idx]
+        token_sequence = self.tokens[idx]
+        if len(token_sequence) > self.max_len:
+            token_sequence = token_sequence[:self.max_len]
         return {
             'input_ids': torch.tensor(token_sequence, dtype=torch.long),
             'index': idx
@@ -72,9 +67,6 @@ class PileDataset(Dataset):
             entry = f.read(self.sizes[idx] * self.dtype().itemsize)
         
         tokens = np.frombuffer(entry, dtype=self.dtype).tolist()
-        if len(tokens) != self.max_len:
-            return None  # Return None to signal an invalid batch
-        
         return {
             'input_ids': torch.tensor(tokens, dtype=torch.long),
             'index': idx
@@ -113,35 +105,30 @@ def custom_collate_fn(batch):
     # Filter out any None items from the batch
     batch = [item for item in batch if item is not None]
     return default_collate(batch) if batch else None
+
 class CombinedTrainer:
-    def __init__(self, cfg, rw_loader, pile_loader, tokenizer):
+    def __init__(self, cfg, seq_loader, pile_loader, tokenizer):
         self.cfg = cfg
-        self.rw_loader = rw_loader
+        self.seq_loader = seq_loader
         self.pile_loader = pile_loader
         self.device = cfg["gpu_device"]
         self.model = GPTNeoXForCausalLM.from_pretrained(cfg["main_model"]["name"]).to(self.device)
         self.optimizer = optim.AdamW(self.model.parameters(), lr=cfg["starting_learning_rate"])
-        total_steps = len(rw_loader) * cfg["num_epochs"]
+        total_steps = len(seq_loader) * cfg["num_epochs"]
         warmup_steps = int(total_steps * 0.1)
         self.scheduler = get_linear_schedule_with_warmup(self.optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
         self.num_epochs = cfg["num_epochs"]
         self.results = []
         self.tokenizer = tokenizer
-
-        # Calculate the token sizes for rolling window and pile data based on percentage
         self.max_tokens = cfg["max_tokens"]
-        self.rw_token_size = int(self.max_tokens * cfg["percentage_window"] / 100)
-        self.pile_token_size = self.max_tokens - self.rw_token_size
-
-        # Print the calculated token sizes
-        print(f"Max Tokens: {self.max_tokens}, Rolling Window Tokens: {self.rw_token_size}, Pile Tokens: {self.pile_token_size}")
+        self.first_batch_logged = False  # To ensure only the first batch is logged
 
     def train(self):
         self.model.train()
 
         for epoch in range(self.num_epochs):
             print(f"Starting Epoch {epoch + 1}/{self.num_epochs}")
-            rw_iter = iter(self.rw_loader)
+            seq_iter = iter(self.seq_loader)
             pile_iter = iter(self.pile_loader)
 
             epoch_loss = 0
@@ -151,15 +138,20 @@ class CombinedTrainer:
                 if self.cfg["max_steps_per_epoch"] is not None and steps >= self.cfg["max_steps_per_epoch"]:
                     break
 
-                # Rolling Window Data
-                rw_batch = next(rw_iter, None)
-                if rw_batch is None or not isinstance(rw_batch, dict) or rw_batch['input_ids'].shape[1] < self.rw_token_size:
-                    print(f"Invalid or insufficient rolling window data at step {steps + 1}. Ending epoch early.")
+                # Sequential Data
+                seq_batch = next(seq_iter, None)
+                if seq_batch is None or not isinstance(seq_batch, dict):
+                    print(f"Invalid or insufficient sequential data at step {steps + 1}. Ending epoch early.")
                     break
 
-                # Pile Data
+                seq_tokens = seq_batch['input_ids'].flatten()  # Flatten to ensure a single sequence
+                remaining_tokens = self.max_tokens - seq_tokens.size(0)
+
                 pile_tokens = []
-                while len(pile_tokens) < self.pile_token_size:
+                pile_sizes = []  # Store the size of each Pile data item
+
+                # Fill remaining tokens with Pile data
+                while remaining_tokens > 0:
                     pile_batch = next(pile_iter, None)
                     while pile_batch is None or not isinstance(pile_batch, dict):
                         pile_batch = next(pile_iter, None)
@@ -167,17 +159,40 @@ class CombinedTrainer:
                             pile_iter = iter(self.pile_loader)
                             pile_batch = next(pile_iter, None)
 
-                    pile_tokens.extend(pile_batch['input_ids'][0].tolist())
+                    pile_item_tokens = pile_batch['input_ids'].flatten().tolist()
+                    pile_sizes.append(len(pile_item_tokens))  # Track the size of each Pile data item
 
-                # Trim excess tokens if necessary
-                if len(pile_tokens) > self.pile_token_size:
-                    pile_tokens = pile_tokens[:self.pile_token_size]
+                    pile_tokens.extend(pile_item_tokens)
 
-                pile_tokens = torch.tensor(pile_tokens, dtype=torch.long).unsqueeze(0)
+                    if len(pile_tokens) >= remaining_tokens:
+                        pile_tokens = pile_tokens[:remaining_tokens]
+                        break
+                    remaining_tokens -= len(pile_tokens)
 
-                # Combine Data
-                combined_input_ids = torch.cat([rw_batch['input_ids'][:, :self.rw_token_size], pile_tokens], dim=1)
-                batch_inputs = {'input_ids': combined_input_ids.to(self.device, non_blocking=True)}
+                pile_tokens = torch.tensor(pile_tokens, dtype=torch.long).flatten()  # Flatten Pile tokens
+
+                total_batch_size = pile_tokens.size(0) + seq_tokens.size(0)
+
+                # Ensure total batch size is always max_tokens (4098)
+                if total_batch_size < self.max_tokens:
+                    # Padding if necessary (this case should rarely happen due to filling with Pile data)
+                    padding_size = self.max_tokens - total_batch_size
+                    padded_tokens = torch.cat([seq_tokens, pile_tokens, torch.zeros(padding_size, dtype=torch.long)], dim=0)
+                else:
+                    padded_tokens = torch.cat([seq_tokens, pile_tokens], dim=0)[:self.max_tokens]
+
+                if not self.first_batch_logged:
+                    # Print out the size of pile and sequential parts for the first batch only
+                    print(f"First Batch Debug Info:")
+                    print(f"Sequential Tokens Size: {seq_tokens.size(0)}")
+                    print(f"Pile Tokens Sizes: {pile_sizes}")
+                    print(f"Pile Tokens Total Size: {pile_tokens.size(0)}")
+                    print(f"Total Batch Size (should equal 4098): {padded_tokens.size(0)}")
+                    self.first_batch_logged = True
+
+                padded_tokens = padded_tokens.unsqueeze(0)  # Add batch dimension
+
+                batch_inputs = {'input_ids': padded_tokens.to(self.device)}
 
                 self.optimizer.zero_grad()
                 outputs = self.model(**batch_inputs, labels=batch_inputs['input_ids'])
@@ -187,17 +202,14 @@ class CombinedTrainer:
                 self.scheduler.step()
                 epoch_loss += loss.item()
 
-                rw_inference_loss, pile_inference_loss = self.calculate_inference_loss(rw_batch, pile_tokens)
+                # Print loss for every batch
+                print(f"Epoch {epoch + 1}/{self.num_epochs}, Step {steps + 1}: Train Loss = {loss.item()}, Learning Rate = {self.scheduler.get_last_lr()[0]}")
 
-                print(f"Epoch {epoch + 1}/{self.num_epochs}, Step {steps + 1}: Train Loss = {loss.item()}, Learning Rate = {self.scheduler.get_last_lr()[0]}, RW Inference Loss = {rw_inference_loss}, Pile Inference Loss = {pile_inference_loss}")
-                
                 self.results.append({
                     'epoch': epoch + 1,
                     'step': steps + 1,
                     'train_loss': loss.item(),
-                    'learning_rate': self.scheduler.get_last_lr()[0],
-                    'rw_inference_loss': rw_inference_loss,
-                    'pile_inference_loss': pile_inference_loss
+                    'learning_rate': self.scheduler.get_last_lr()[0]
                 })
 
                 steps += 1
@@ -205,26 +217,8 @@ class CombinedTrainer:
             final_model_path = os.path.join(self.cfg["experiment_dir"], f"{self.cfg['experiment_name']}_epoch_{epoch}.pt")
             torch.save(self.model.state_dict(), final_model_path)
             self.save_results()
+
         print(f"Training completed. Final model saved at: {final_model_path}")
-
-    def calculate_inference_loss(self, rw_batch, pile_batch):
-        self.model.eval()
-        rw_inference_loss = 0
-        pile_inference_loss = 0
-
-        with torch.no_grad():
-            # Calculate inference loss for rolling window data
-            rw_batch_inputs = {k: v.to(self.device, non_blocking=True) for k, v in rw_batch.items() if k != 'index'}
-            rw_outputs = self.model(**rw_batch_inputs, labels=rw_batch_inputs['input_ids'])
-            rw_inference_loss = rw_outputs.loss.item()
-
-            # Calculate inference loss for pile data
-            pile_batch_inputs = {k: v.to(self.device, non_blocking=True) for k, v in pile_batch.items() if k != 'index'}
-            pile_outputs = self.model(**pile_batch_inputs, labels=pile_batch_inputs['input_ids'])
-            pile_inference_loss = pile_outputs.loss.item()
-
-        self.model.train()
-        return rw_inference_loss, pile_inference_loss
 
     def save_results(self):
         results_df = pd.DataFrame(self.results)
@@ -250,19 +244,22 @@ def main():
     save_config(cfg, experiment_dir)
 
     tokenizer = PreTrainedTokenizerFast(tokenizer_file=cfg["tokenizer_path"], clean_up_tokenization_spaces=False)
-    
-    step_size = int(cfg["window_size"] * cfg["step_size_percentage"] / 100)
-    rw_dataset = RollingWindowDataset(cfg["window_data_path"], window_size=cfg["window_size"], step_size=step_size)
-    rw_loader = DataLoader(rw_dataset, batch_size=1, shuffle=False, pin_memory=True, collate_fn=custom_collate_fn,num_workers=4)
+
+    # Create datasets and data loaders
+    seq_dataset = SequentialMemoryPileDataset(cfg["sequential_data_path"], max_len=cfg["max_tokens"])
+    seq_loader = DataLoader(seq_dataset, batch_size=1, shuffle=False, pin_memory=True, collate_fn=custom_collate_fn, num_workers=4)
 
     dtype, sizes, pointers, doc_idx = load_index_file(cfg['pile_data']['index_file_path'])
-    pile_dataset = PileDataset(cfg['pile_data']['bin_file_path'], pointers, sizes, dtype, tokenizer, max_len=cfg['pile_data']['max_length'])
-    pile_loader = DataLoader(pile_dataset, batch_size=1, shuffle=True, pin_memory=True, collate_fn=custom_collate_fn,num_workers=4)
+    pile_dataset = PileDataset(cfg['pile_data']['bin_file_path'], pointers, sizes, dtype, tokenizer, max_len=cfg['pile_data']['max_size'])
+    pile_loader = DataLoader(pile_dataset, batch_size=1, shuffle=True, pin_memory=True, collate_fn=custom_collate_fn, num_workers=4)
 
-    total_steps = len(rw_loader) * cfg["num_epochs"]
+    # Print out the number of steps and epochs
+    total_steps = len(seq_loader) * cfg["num_epochs"]
     cfg["total_steps"] = total_steps
+    print(f"Total Steps: {total_steps}, Number of Epochs: {cfg['num_epochs']}")
 
-    trainer = CombinedTrainer(cfg, rw_loader, pile_loader, tokenizer)
+    # Pass the initialized loaders to the trainer
+    trainer = CombinedTrainer(cfg, seq_loader, pile_loader, tokenizer)
     trainer.train()
 
 if __name__ == "__main__":
