@@ -1,5 +1,0 @@
-torch
-fairscale
-fire
-sentencepiece
-matplotlib
