@@ -1,0 +1,54 @@
+name: finetune
+channels:
+  - defaults
+dependencies:
+  - python=3.8.*
+  - pip
+  - pip:
+      - absl-py
+      - accelerate
+      - aiohttp
+      - annotated-types
+      - attrs
+      - boto3
+      - cachetools
+      - click
+      - datasets
+      - dill
+      - huggingface-hub
+      - jinja2
+      - joblib
+      - matplotlib
+      - nltk
+      - numpy
+      - openai
+      - pandas
+      - pathy
+      - pillow
+      - protobuf
+      - psutil
+      - pyarrow
+      - pydantic
+      - pytest
+      - pyyaml
+      - regex
+      - requests
+      - spacy
+      - tensorboard
+      - tokenizers
+      - tqdm
+      - transformers
+      - typer
+      - urllib3
+      - werkzeug
+      - scikit-learn
+      - torch
+      - trl
+      - textblob
+      - fairscale
+      - fire
+      - sentencepiece
+      - peft
+      - nltk 
+      - bitsandbytes
+prefix: /home/ec2-user/miniconda3/envs/finetune
