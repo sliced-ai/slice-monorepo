@@ -1,0 +1,31 @@
+conda create --name finetunes
+conda activate finetunes
+pip install -e .
+
+pip install flask
+
+
+URL:
+
+https://download.llamameta.net/*?Policy=eyJTdGF0ZW1lbnQiOlt7InVuaXF1ZV9oYXNoIjoidjZ6d3VzbXdqbTNpNnU0a2d5bjlseG10IiwiUmVzb3VyY2UiOiJodHRwczpcL1wvZG93bmxvYWQubGxhbWFtZXRhLm5ldFwvKiIsIkNvbmRpdGlvbiI6eyJEYXRlTGVzc1RoYW4iOnsiQVdTOkVwb2NoVGltZSI6MTcxNTI3NjY4MH19fV19&Signature=e5iCgX4bpPn3YdJnxYrMHg65lPXre7ABgoH34gOH0yVNNmPcWFrXEQPlRCdFHZIjSyYiHNe1Qr%7EaINVg3z6KVYY-AkJIQgwsdV1QRgc0cCM5CCXNcGIYXOUDUSmhMTXL5xLgwOWLZsY0LScu5Z8WAabTQnkiGBEW38RqrA4y32EIunElQLwy8rEC2T7tNaD4kLxq3e%7EG43Rap8UPTBrT-e29%7Efpepbs5we7ucgcVyJkOIkW0I-xXWu3Tt-sEyL9SwKnBe9wIymu-dbUzNbF0jLg%7Eh3BkwrDZEQtB32zNjY5iiqFA11cuEvwyKI0WTVQCu4VEzo7WJiNDTDtW8w17oA__&Key-Pair-Id=K15QRJLYKIFSLZ&Download-Request-ID=436268695792107
+
+
+
+
+export RANK=0
+export WORLD_SIZE=1
+CKPT_DIR="/home/ec2-user/environment/pipeline/0_shared/models/llama-2-7b-chat"
+TOKENIZER_PATH="/home/ec2-user/environment/pipeline/0_shared/models/tokenizer.model"
+torchrun --nproc_per_node 1 app.py --tokenizer_path $TOKENIZER_PATH --ckpt_dir $CKPT_DIR
+
+
+test train
+
+
+export RANK=0
+export WORLD_SIZE=2
+torchrun --nproc_per_node 1 train_evaluation.py
+
+
+export WORLD_SIZE=4
+torchrun --nproc_per_node 4 train_evaluation.py

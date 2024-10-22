@@ -1,0 +1,15 @@
+Experiment: loop_optimizer_1
+
+model_name: EleutherAI/pythia-70m
+learning_rate: 0.0001
+training_batch_size: 1
+inference_batch_size: 200
+num_train_epochs: 1
+max_length: 128
+repeat_loops: 20
+experiment_name: loop_optimizer_1
+qa_data_file: /workspace/slice-monorepo/sub_validations/episodic_memory_paper/qa_data.json
+pile_data_file: /workspace/slice-monorepo/sub_validations/unique_seq_sentence/detokenized_output.json
+inference_params: {'max_new_tokens': 50, 'temperature': 0.7, 'top_k': 50, 'do_sample': True}
+device: cuda
+cosine_similarity_target: 0.9
