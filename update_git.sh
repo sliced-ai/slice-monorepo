@@ -2,7 +2,7 @@
 
 # Configuration
 REPO_DIR="/workspace/slice-monorepo"  # Replace this with the path to your local repository
-BRANCH="main"
+BRANCH="cl_pipeline_runpod"
 SSH_DIR="$HOME/.ssh"
 SSH_KEY_NAME="runpod"
 SSH_PRIVATE_KEY_PATH="$SSH_DIR/$SSH_KEY_NAME"
